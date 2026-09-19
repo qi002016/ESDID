@@ -1,0 +1,112 @@
+<html style="margin:0;padding:0;">
+<title>电商看板 Text-to-SQL 双 Agent 架构图</title>
+<div style="width:100%;box-sizing:border-box;font-family:'Microsoft YaHei',system-ui,sans-serif;background:#f4f6f9;padding:18px;color:#1f2937;">
+    <div style="font-size:17px;font-weight:700;margin-bottom:2px;">电商看板 · Text-to-SQL 双 Agent 架构</div>
+    <div style="font-size:12px;color:#6b7280;margin-bottom:14px;">FastAPI + LangChain + DeepSeek + Redis + Milvus(本地兜底)
+        + MySQL · 本项目实际实现
+    </div>
+
+    <!-- ① 交互层 -->
+    <div style="border:2px solid #2b6cb0;border-radius:10px;background:#fff;padding:10px 14px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;">
+        <div style="font-size:13px;font-weight:700;color:#2b6cb0;background:#e8f0fb;border-radius:6px;padding:4px 10px;">
+            ① 交互层
+        </div>
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+            <span style="background:#dbeafe;border-radius:8px;padding:6px 12px;font-size:13px;">🙋 用户 · 自然语言提问</span>
+            <span style="color:#2b6cb0;font-weight:700;">⇄</span>
+            <span style="background:#dbeafe;border-radius:8px;padding:6px 12px;font-size:13px;">🖥️ 前端 · SSE 流式 + ECharts</span>
+        </div>
+    </div>
+
+    <!-- 步骤箭头 -->
+    <div style="text-align:center;font-size:13px;color:#2b6cb0;margin:6px 0;font-weight:700;">▼ POST /chat ·
+        事件流：thinking → sql → answer → chart → done
+    </div>
+
+    <!-- ② Agent 层 -->
+    <div style="border:2px solid #7c3aed;border-radius:10px;background:#fff;padding:12px 14px;">
+        <div style="font-size:13px;font-weight:700;color:#7c3aed;background:#f3e8ff;border-radius:6px;padding:4px 10px;display:inline-block;margin-bottom:10px;">
+            ② Agent 层 · LangChain 双 Agent（DeepSeek 驱动）
+        </div>
+        <div style="display:flex;gap:10px;flex-wrap:wrap;">
+            <!-- Agent1 -->
+            <div style="flex:1;min-width:260px;border:1px solid #ddd;border-radius:8px;padding:10px;background:#fafafa;">
+                <div style="font-weight:700;font-size:14px;color:#7c3aed;margin-bottom:6px;">Agent 1 · SQL 生成</div>
+                <div style="font-size:12px;color:#374151;line-height:1.7;">
+                    ✦ 意图理解 / 指代消解（继承历史）<br>
+                    ✦ 工具循环：检索模板 → 生成 SQL → 执行 → 报错回喂重试（≤3 轮）<br>
+                    ✦ 输出：一条只读 SELECT
+                </div>
+                <div style="margin-top:8px;border-top:1px dashed #cbd5e1;padding-top:6px;font-size:12px;color:#6b7280;">
+                    工具① <b>search_sql_templates</b> · 工具② <b>execute_sql</b>
+                </div>
+            </div>
+            <!-- Agent2 -->
+            <div style="flex:1;min-width:260px;border:1px solid #ddd;border-radius:8px;padding:10px;background:#fafafa;">
+                <div style="font-weight:700;font-size:14px;color:#7c3aed;margin-bottom:6px;">Agent 2 · 数据分析</div>
+                <div style="font-size:12px;color:#374151;line-height:1.7;">
+                    ✦ 只基于给定数据下结论（防幻觉）<br>
+                    ✦ 说明口径 · 异常归因 · 业务建议<br>
+                    ✦ 输出 JSON：{answer, charts[ECharts spec]}
+                </div>
+                <div style="margin-top:8px;border-top:1px dashed #cbd5e1;padding-top:6px;font-size:12px;color:#6b7280;">
+                    输入：问题 + SQL + 查询结果
+                </div>
+            </div>
+        </div>
+        <!-- 记忆与 RAG -->
+        <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:10px;">
+            <div style="flex:1;min-width:220px;background:#eef2ff;border-radius:8px;padding:8px 12px;font-size:12px;color:#3730a3;">
+                📚 <b>RAG · SQL 模板库</b><br><span style="color:#6b7280;">Milvus（虚拟机）→ 不可达自动降级本地向量检索 · 召回 Top-4 模板注入提示词（few-shot）</span>
+            </div>
+            <div style="flex:1;min-width:220px;background:#fef3c7;border-radius:8px;padding:8px 12px;font-size:12px;color:#92400e;">
+                🧠 <b>Redis 记忆</b><br><span style="color:#6b7280;">session:{id} 会话历史（指代消解）· sql:result:{hash} 结果缓存 · rate:{id} 限流</span>
+            </div>
+        </div>
+        <div style="text-align:center;font-size:12px;color:#6b7280;margin-top:8px;">Agent1 → 安全执行 → 结果 →
+            Agent2（SQL 与结果串联两 Agent）
+        </div>
+    </div>
+
+    <!-- 步骤箭头 -->
+    <div style="text-align:center;font-size:13px;color:#7c3aed;margin:6px 0;font-weight:700;">▼ 生成 SQL 必经安全层
+    </div>
+
+    <!-- ③ 安全与数据层 -->
+    <div style="border:2px solid #059669;border-radius:10px;background:#fff;padding:12px 14px;">
+        <div style="font-size:13px;font-weight:700;color:#059669;background:#d1fae5;border-radius:6px;padding:4px 10px;display:inline-block;margin-bottom:10px;">
+            ③ 安全与数据层 · 三层防线
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+            <span style="background:#ecfdf5;border:1px solid #a7f3d0;border-radius:8px;padding:6px 12px;font-size:12px;">🔒 sqlglot 解析校验<br><span
+                    style="color:#6b7280;">单条 SELECT · 表/字段白名单 · 禁危险语法 · 自动 LIMIT</span></span>
+            <span style="color:#059669;font-weight:700;">→</span>
+            <span style="background:#ecfdf5;border:1px solid #a7f3d0;border-radius:8px;padding:6px 12px;font-size:12px;">🔐 只读账号<br><span
+                    style="color:#6b7280;">agent_ro · GRANT SELECT</span></span>
+            <span style="color:#059669;font-weight:700;">→</span>
+            <span style="background:#ecfdf5;border:1px solid #a7f3d0;border-radius:8px;padding:6px 12px;font-size:12px;">⏱️ 超时 10s + LIMIT 1000<br><span
+                    style="color:#6b7280;">防慢查询 / 防超大结果集</span></span>
+            <span style="color:#059669;font-weight:700;">→</span>
+            <span style="background:#064e3b;color:#fff;border-radius:8px;padding:8px 14px;font-size:13px;font-weight:700;">🗄️ MySQL · ecommerce<br><span
+                    style="font-weight:400;font-size:11px;">orders 44375 条 · sales_target 96 条 · 2026 全年</span></span>
+        </div>
+    </div>
+
+    <!-- 步骤说明 -->
+    <div style="border:1px dashed #cbd5e1;border-radius:10px;background:#fff;padding:10px 14px;margin-top:14px;">
+        <div style="font-size:13px;font-weight:700;margin-bottom:6px;">一次问答的 6 步（示例：上个月手机品类销售额环比）
+        </div>
+        <div style="display:flex;flex-wrap:wrap;gap:6px;font-size:12px;color:#374151;line-height:1.6;">
+            <span style="background:#eef2ff;border-radius:6px;padding:3px 8px;">① 前端 SSE 提交问题（session_id）</span>
+            <span style="background:#eef2ff;border-radius:6px;padding:3px 8px;">② Agent1 取 Redis 历史，消解「上个月」→ 2026-11</span>
+            <span style="background:#eef2ff;border-radius:6px;padding:3px 8px;">③ Agent1 检索模板命中「环比」→ 生成条件聚合 SQL</span>
+            <span style="background:#eef2ff;border-radius:6px;padding:3px 8px;">④ 安全校验通过 → 只读执行 → 结果缓存</span>
+            <span style="background:#eef2ff;border-radius:6px;padding:3px 8px;">⑤ Agent2 解读：手机环比 -49% + 折线图 spec</span>
+            <span style="background:#eef2ff;border-radius:6px;padding:3px 8px;">⑥ SSE 流式返回，前端渲染文字 + ECharts</span>
+        </div>
+        <div style="font-size:11px;color:#9ca3af;margin-top:6px;">注：Milvus 部署在虚拟机 Docker，当前未开机 →
+            自动降级本地向量检索（功能等价，接口不变）。
+        </div>
+    </div>
+</div>
+</html>

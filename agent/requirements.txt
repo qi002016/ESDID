@@ -1,0 +1,33 @@
+# =============================================================
+# 电商看板 Text-to-SQL 双 Agent —— Python 依赖
+# 安装：pip install -r requirements.txt
+# =============================================================
+
+# ---- Web 层 ----
+fastapi>=0.111
+uvicorn[standard]>=0.30
+
+# ---- LangChain 生态（Agent 核心）----
+langchain>=0.2
+langchain-core>=0.2
+langchain-openai>=0.1   # 通过 OpenAI 兼容协议接 DeepSeek
+
+# ---- 数据库 ----
+sqlalchemy>=2.0
+pymysql>=1.1            # MySQL 驱动
+psycopg[binary]>=3.1    # PostgreSQL 驱动（历史对话归档）
+
+# ---- SQL 安全校验 ----
+sqlglot>=23.0
+
+# ---- 中间件客户端 ----
+redis>=5.0              # 会话记忆 / 结果缓存 / 限流
+pymilvus>=2.4           # SQL 模板向量库（不可达时自动降级本地实现）
+
+# ---- 通用 ----
+pydantic>=2.0
+python-dotenv>=1.0
+
+# ---- 测试 ----
+pytest>=8.0
+httpx>=0.27
