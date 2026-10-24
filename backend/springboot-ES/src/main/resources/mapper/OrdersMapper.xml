@@ -1,0 +1,319 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.heima.mapper.OrdersMapper">
+
+    <!-- ===================== A1 品类列表 ===================== -->
+
+    <select id="countProductsByCategory" resultType="com.heima.domain.vo.CategoryVO">
+        SELECT category,
+               COUNT(DISTINCT product_name) AS productCount
+        FROM orders
+        GROUP BY category
+        ORDER BY productCount DESC
+    </select>
+
+    <!-- ===================== A2 订单分页查询 ===================== -->
+
+    <!-- A2 总记录数 -->
+    <select id="countOrders" resultType="long">
+        SELECT COUNT(*)
+        FROM orders
+        <where>
+            order_time &gt;= #{q.startDate} AND order_time &lt; DATE_ADD(#{q.endDate}, INTERVAL 1 DAY)
+            <if test="q.category != null and q.category != ''">AND category = #{q.category}</if>
+            <if test="q.payType != null and q.payType != ''">AND pay_type = #{q.payType}</if>
+            <if test="q.userType != null and q.userType != ''">AND user_type = #{q.userType}</if>
+            <if test="q.promoFlag != null">AND promo_flag = #{q.promoFlag}</if>
+            <if test="q.keyword != null and q.keyword != ''">
+                AND (order_id LIKE CONCAT('%', #{q.keyword}, '%') OR product_name LIKE CONCAT('%', #{q.keyword}, '%'))
+            </if>
+        </where>
+    </select>
+
+    <!-- A2 分页记录：sortColumn / sortDirection 已在 SqlSortWhitelist 中白名单校验 -->
+    <select id="pageOrders" resultType="com.heima.domain.vo.OrderVO">
+        SELECT order_id, product_name, category, price, quantity, total_amount, order_time,
+               user_id, user_type, pay_type, promo_flag, region
+        FROM orders
+        <where>
+            order_time &gt;= #{q.startDate} AND order_time &lt; DATE_ADD(#{q.endDate}, INTERVAL 1 DAY)
+            <if test="q.category != null and q.category != ''">AND category = #{q.category}</if>
+            <if test="q.payType != null and q.payType != ''">AND pay_type = #{q.payType}</if>
+            <if test="q.userType != null and q.userType != ''">AND user_type = #{q.userType}</if>
+            <if test="q.promoFlag != null">AND promo_flag = #{q.promoFlag}</if>
+            <if test="q.keyword != null and q.keyword != ''">
+                AND (order_id LIKE CONCAT('%', #{q.keyword}, '%') OR product_name LIKE CONCAT('%', #{q.keyword}, '%'))
+            </if>
+        </where>
+        ORDER BY ${sortColumn} ${sortDirection}
+        LIMIT #{offset}, #{size}
+    </select>
+
+    <!-- ===================== A6 订单详情 ===================== -->
+
+    <select id="getByOrderId" resultType="com.heima.domain.vo.OrderVO">
+        SELECT order_id, product_name, category, price, quantity, total_amount, order_time,
+               user_id, user_type, pay_type, promo_flag, region
+        FROM orders
+        WHERE order_id = #{orderId}
+        LIMIT 1
+    </select>
+
+    <!-- ===================== A3 KPI 汇总 ===================== -->
+
+    <select id="kpi" resultType="com.heima.domain.dto.KpiRow">
+        SELECT
+            COALESCE(SUM(total_amount), 0)                                 AS totalSales,
+            COUNT(*)                                                       AS totalOrders,
+            COALESCE(ROUND(SUM(total_amount) / NULLIF(COUNT(*), 0), 2), 0)  AS avgOrderValue,
+            COUNT(DISTINCT product_name)                                   AS hotProductCount,
+            COUNT(DISTINCT user_id)                                        AS totalUsers,
+            COUNT(DISTINCT CASE WHEN user_type = 'new' THEN user_id END)    AS newUserCount,
+            (SELECT COUNT(*) FROM (
+                SELECT user_id FROM orders
+                WHERE order_time &gt;= #{startDate} AND order_time &lt; DATE_ADD(#{endDate}, INTERVAL 1 DAY)
+                <if test="category != null and category != ''">AND category = #{category}</if>
+                GROUP BY user_id HAVING COUNT(*) &gt; 1
+            ) t)                                                           AS repurchaseUsers
+        FROM orders
+        WHERE order_time &gt;= #{startDate} AND order_time &lt; DATE_ADD(#{endDate}, INTERVAL 1 DAY)
+        <if test="category != null and category != ''">AND category = #{category}</if>
+    </select>
+
+    <!-- ===================== A4 商品 TOP10 ===================== -->
+
+    <!-- orderBy 只可能是 sales / quantity（服务层白名单），resultType 里 rank 由 Java 补 -->
+    <select id="productRanking" resultType="com.heima.domain.vo.RankingVO">
+        SELECT product_name              AS productName,
+               ROUND(SUM(total_amount), 2) AS sales,
+               SUM(quantity)             AS quantity
+        FROM orders
+        <where>
+            order_time &gt;= #{q.startDate} AND order_time &lt; DATE_ADD(#{q.endDate}, INTERVAL 1 DAY)
+            <if test="q.category != null and q.category != ''">AND category = #{q.category}</if>
+        </where>
+        GROUP BY product_name
+        ORDER BY ${orderBy} DESC
+        LIMIT #{limit}
+    </select>
+
+    <!-- ===================== A5 时间粒度聚合 ===================== -->
+
+    <!-- granularity.expr 为 Granularity 枚举常量，不含用户输入 -->
+    <select id="orderStats" resultType="com.heima.domain.dto.PeriodRow">
+        SELECT ${granularity.expr}          AS period,
+               ROUND(SUM(total_amount), 2)  AS sales,
+               COUNT(*)                     AS orders
+        FROM orders
+        <where>
+            order_time &gt;= #{startDate} AND order_time &lt; DATE_ADD(#{endDate}, INTERVAL 1 DAY)
+            <if test="category != null and category != ''">AND category = #{category}</if>
+        </where>
+        GROUP BY period
+        ORDER BY period ASC
+    </select>
+
+    <!-- ===================== A8 客单价区间分布 ===================== -->
+
+    <select id="priceDistribution" resultType="com.heima.domain.dto.PriceIntervalRow">
+        SELECT t.range_label          AS `range`,
+               COUNT(*)               AS orderCount,
+               ROUND(SUM(t.total_amount), 2) AS sales
+        FROM (
+            SELECT total_amount,
+                   CASE
+                       WHEN total_amount &lt; 100  THEN '0-100'
+                       WHEN total_amount &lt; 300  THEN '100-300'
+                       WHEN total_amount &lt; 500  THEN '300-500'
+                       WHEN total_amount &lt; 1000 THEN '500-1000'
+                       WHEN total_amount &lt; 5000 THEN '1000-5000'
+                       ELSE '5000以上'
+                   END AS range_label
+            FROM orders
+            <where>
+                order_time &gt;= #{startDate} AND order_time &lt; DATE_ADD(#{endDate}, INTERVAL 1 DAY)
+                <if test="category != null and category != ''">AND category = #{category}</if>
+            </where>
+        ) t
+        GROUP BY t.range_label
+        ORDER BY MIN(t.total_amount)
+    </select>
+
+    <!-- ===================== A9 品类贡献（帕累托） ===================== -->
+
+    <select id="categoryContribution" resultType="com.heima.domain.dto.ContributionRow">
+        SELECT category,
+               sales,
+               ROUND(sales / SUM(sales) OVER (), 4) AS salesRatio,
+               ROUND(SUM(sales) OVER (ORDER BY sales DESC, category
+                     ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) / SUM(sales) OVER (), 4) AS cumulativeRatio
+        FROM (
+            SELECT category, ROUND(SUM(total_amount), 2) AS sales
+            FROM orders
+            WHERE order_time &gt;= #{startDate} AND order_time &lt; DATE_ADD(#{endDate}, INTERVAL 1 DAY)
+            GROUP BY category
+        ) t
+        ORDER BY sales DESC
+    </select>
+
+    <!-- ===================== A14 周期内各品类达成额 ===================== -->
+
+    <select id="achievedByCategory" resultType="com.heima.domain.dto.CategorySalesRow">
+        SELECT category,
+               ROUND(SUM(total_amount), 2) AS achieved
+        FROM orders
+        WHERE order_time &gt;= #{periodStart} AND order_time &lt; DATE_ADD(#{periodEnd}, INTERVAL 1 DAY)
+        GROUP BY category
+    </select>
+
+    <!-- ===================== A10 下单时段分布 ===================== -->
+
+    <select id="hourly" resultType="com.heima.domain.dto.HourlyRow">
+        SELECT HOUR(order_time)            AS hour,
+               COUNT(*)                    AS orderCount,
+               ROUND(SUM(total_amount), 2) AS sales
+        FROM orders
+        <where>
+            order_time &gt;= #{startDate} AND order_time &lt; DATE_ADD(#{endDate}, INTERVAL 1 DAY)
+            <if test="category != null and category != ''">AND category = #{category}</if>
+        </where>
+        GROUP BY HOUR(order_time)
+        ORDER BY hour ASC
+    </select>
+
+    <!-- ===================== A11 用户分析 ===================== -->
+
+    <select id="userTypeAgg" resultType="com.heima.domain.dto.UserTypeAggRow">
+        SELECT user_type                   AS userType,
+               COUNT(DISTINCT user_id)     AS userCount,
+               ROUND(SUM(total_amount), 2) AS sales,
+               COUNT(*)                    AS orderCount
+        FROM orders
+        <where>
+            order_time &gt;= #{startDate} AND order_time &lt; DATE_ADD(#{endDate}, INTERVAL 1 DAY)
+            <if test="category != null and category != ''">AND category = #{category}</if>
+        </where>
+        GROUP BY user_type
+    </select>
+
+    <select id="payTypeRates" resultType="com.heima.domain.vo.UserAnalysisVO$PayTypeRateVO">
+        SELECT pay_type                       AS payType,
+               COUNT(*)                       AS orderCount,
+               ROUND(COUNT(*) / SUM(COUNT(*)) OVER (), 4) AS rate
+        FROM orders
+        <where>
+            order_time &gt;= #{startDate} AND order_time &lt; DATE_ADD(#{endDate}, INTERVAL 1 DAY)
+            <if test="category != null and category != ''">AND category = #{category}</if>
+        </where>
+        GROUP BY pay_type
+        ORDER BY orderCount DESC
+    </select>
+
+    <select id="distinctUserCount" resultType="int">
+        SELECT COUNT(DISTINCT user_id)
+        FROM orders
+        <where>
+            order_time &gt;= #{startDate} AND order_time &lt; DATE_ADD(#{endDate}, INTERVAL 1 DAY)
+            <if test="category != null and category != ''">AND category = #{category}</if>
+        </where>
+    </select>
+
+    <select id="repurchaseUserCount" resultType="int">
+        SELECT COUNT(*)
+        FROM (
+            SELECT user_id
+            FROM orders
+            <where>
+                order_time &gt;= #{startDate} AND order_time &lt; DATE_ADD(#{endDate}, INTERVAL 1 DAY)
+                <if test="category != null and category != ''">AND category = #{category}</if>
+            </where>
+            GROUP BY user_id
+            HAVING COUNT(*) &gt; 1
+        ) t
+    </select>
+
+    <!-- ===================== A17 地域销售分布 ===================== -->
+
+    <select id="regionSales" resultType="com.heima.domain.dto.RegionRow">
+        SELECT region,
+               ROUND(SUM(total_amount), 2) AS sales,
+               COUNT(*)                    AS orderCount,
+               ROUND(SUM(total_amount) / SUM(SUM(total_amount)) OVER (), 4) AS salesRatio
+        FROM orders
+        <where>
+            order_time &gt;= #{startDate} AND order_time &lt; DATE_ADD(#{endDate}, INTERVAL 1 DAY)
+            <if test="category != null and category != ''">AND category = #{category}</if>
+            AND region IS NOT NULL AND region &lt;&gt; ''
+        </where>
+        GROUP BY region
+        ORDER BY sales DESC
+    </select>
+
+    <!-- ===================== A15 促销活动效果 ===================== -->
+
+    <select id="campaignMetrics" resultType="com.heima.domain.dto.CampaignMetricsRow">
+        SELECT COUNT(*)                                            AS orders,
+               COALESCE(ROUND(SUM(total_amount), 2), 0)            AS sales,
+               COUNT(CASE WHEN promo_flag = 1 THEN 1 END)          AS promoOrderCount,
+               COALESCE(SUM(CASE WHEN promo_flag = 1 THEN total_amount END), 0) AS promoSales
+        FROM orders
+        <where>
+            order_time &gt;= #{startDate} AND order_time &lt; DATE_ADD(#{endDate}, INTERVAL 1 DAY)
+            <if test="category != null and category != ''">AND category = #{category}</if>
+        </where>
+    </select>
+
+    <!-- ===================== A16 RFM 明细 ===================== -->
+
+    <select id="rfmUsers" resultType="com.heima.domain.dto.RfmUserRow">
+        SELECT user_id                              AS userId,
+               COUNT(*)                             AS frequency,
+               ROUND(SUM(total_amount), 2)          AS monetary,
+               DATEDIFF(#{windowEnd}, MAX(order_time)) AS recencyDays
+        FROM orders
+        <where>
+            order_time &gt;= #{startDate} AND order_time &lt; DATE_ADD(#{endDate}, INTERVAL 1 DAY)
+            <if test="category != null and category != ''">AND category = #{category}</if>
+        </where>
+        GROUP BY user_id
+    </select>
+
+    <!-- ===================== A12 流式导出（游标分页） ===================== -->
+
+    <select id="exportBatch" resultType="com.heima.domain.po.Orders">
+        SELECT id, order_id, product_name, category, price, quantity, total_amount,
+               order_time, user_id, user_type, pay_type, promo_flag, region
+        FROM orders
+        <where>
+            order_time &gt;= #{q.startDate} AND order_time &lt; DATE_ADD(#{q.endDate}, INTERVAL 1 DAY)
+            <if test="lastId &gt; 0">AND id &gt; #{lastId}</if>
+            <if test="q.category != null and q.category != ''">AND category = #{q.category}</if>
+            <if test="q.keyword != null and q.keyword != ''">
+                AND (order_id LIKE CONCAT('%', #{q.keyword}, '%') OR product_name LIKE CONCAT('%', #{q.keyword}, '%'))
+            </if>
+            <if test="q.payType != null and q.payType != ''">AND pay_type = #{q.payType}</if>
+            <if test="q.userType != null and q.userType != ''">AND user_type = #{q.userType}</if>
+        </where>
+        ORDER BY id ASC
+        LIMIT #{size}
+    </select>
+
+    <!-- ===================== A18 批量写入 / 清空 ===================== -->
+
+    <insert id="batchInsert">
+        INSERT INTO orders
+        (order_id, product_name, category, price, quantity, total_amount,
+         order_time, user_id, user_type, pay_type, promo_flag, region)
+        VALUES
+        <foreach collection="list" item="o" separator=",">
+            (#{o.orderId}, #{o.productName}, #{o.category}, #{o.price}, #{o.quantity}, #{o.totalAmount},
+             #{o.orderTime}, #{o.userId}, #{o.userType}, #{o.payType}, #{o.promoFlag}, #{o.region})
+        </foreach>
+    </insert>
+
+    <!-- 覆盖导入清空：用 DELETE 保证与批量写入处于同一事务（TRUNCATE 会隐式提交） -->
+    <delete id="deleteAllOrders">
+        DELETE FROM orders
+    </delete>
+
+</mapper>

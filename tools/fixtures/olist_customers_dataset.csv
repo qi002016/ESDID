@@ -1,0 +1,14 @@
+customer_id,customer_unique_id,customer_zip_code_prefix,customer_city,customer_state
+c1,u1,1037,"sao paulo",SP
+c2,u2,2014,rio de janeiro,RJ
+c3,u3,3011,belo horizonte,MG
+c4,u4,9001,porto alegre,RS
+c5,u5,8001,curitiba,PR
+c6,u6,4001,salvador,BA
+c7,u7,7001,brasilia,DF
+c8,u8,5001,recife,PE
+c9,u9,6001,fortaleza,CE
+c10,u10,6601,belem,PA
+c11,u11,7801,cuiaba,MT
+c12,u12,6501,sao luis,MA
+c13,u13,5801,joao pessoa,PB

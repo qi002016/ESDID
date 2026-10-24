@@ -1,0 +1,192 @@
+@use './tokens.scss';
+
+/* ===========================================================================
+   全局样式
+   =========================================================================== */
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+}
+
+body {
+  background: var(--bg-page);
+  color: var(--t-main);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* 数字统一等宽对齐，避免跳动 */
+.num,
+.tnum {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: 'tnum';
+}
+
+h1,
+h2,
+h3,
+h4 {
+  margin: 0;
+  font-weight: 600;
+}
+
+/* 细腻滚动条：暖灰 */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #d8d5cc;
+  border-radius: 999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #c6c2b6;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* ===========================================================================
+   可访问性：键盘焦点可见 + 尊重减少动态偏好
+   =========================================================================== */
+:focus-visible {
+  outline: 2px solid var(--c-primary);
+  outline-offset: 2px;
+}
+
+/* 自定义按钮（Element Plus 之外的原生 button/input）统一键盘焦点样式 */
+button:focus-visible,
+input:focus-visible,
+[role='button']:focus-visible {
+  outline: 2px solid var(--c-primary);
+  outline-offset: 2px;
+}
+
+/* 减少动态：关闭非必要过渡/动画（用户系统开启"减弱动态效果"时） */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* ===========================================================================
+   Element Plus 主题对齐：卡片 / 按钮 / 表格 / 分页 / 输入
+   =========================================================================== */
+.el-card {
+  border: 1px solid var(--bd-light);
+  border-radius: var(--r-card);
+  box-shadow: var(--sh-card) !important;
+}
+
+.el-button {
+  border-radius: var(--r-control);
+  font-weight: 500;
+}
+
+.el-button--primary {
+  --el-button-bg-color: var(--c-primary);
+  --el-button-border-color: var(--c-primary);
+  --el-button-hover-bg-color: var(--c-primary-hover);
+  --el-button-hover-border-color: var(--c-primary-hover);
+}
+
+/* 描边按钮：细边框、纸白底 */
+.el-button--default {
+  --el-button-border-color: var(--bd-base);
+  --el-button-text-color: var(--t-main);
+  --el-button-hover-bg-color: var(--bg-head);
+  --el-button-hover-border-color: var(--bd-base);
+  --el-button-hover-text-color: var(--t-main);
+}
+
+.el-input__wrapper,
+.el-select__wrapper,
+.el-date-editor.el-input__wrapper {
+  border-radius: var(--r-control);
+  box-shadow: 0 0 0 1px var(--bd-base) inset;
+}
+
+.el-input__wrapper.is-focus,
+.el-select__wrapper.is-focused {
+  box-shadow: 0 0 0 1px var(--c-primary) inset;
+}
+
+/* 表格：表头浅灰、斑马纹、无重边框 */
+.el-table {
+  --el-table-border-color: var(--bd-light);
+  --el-table-header-bg-color: var(--bg-head);
+  --el-table-header-text-color: var(--t-sub);
+  --el-table-row-hover-bg-color: var(--c-primary-50);
+  font-size: 13px;
+}
+
+.el-table th.el-table__cell {
+  background: var(--bg-head) !important;
+  font-weight: 500;
+  color: var(--t-sub);
+}
+
+.el-table .el-table__row--striped td.el-table__cell {
+  background: var(--bg-soft) !important;
+}
+
+.el-table td.el-table__cell,
+.el-table th.el-table__cell {
+  border-bottom: 1px solid var(--bd-light);
+}
+
+/* 表格数字等宽对齐，金额列不跳动 */
+.el-table .cell {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: 'tnum';
+}
+
+.el-pagination {
+  --el-pagination-button-bg-color: transparent;
+  font-variant-numeric: tabular-nums;
+}
+
+.el-dialog {
+  border-radius: var(--r-card);
+  --el-dialog-padding-primary: 20px;
+}
+
+.el-dialog__header {
+  margin-right: 0;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--bd-light);
+}
+
+.el-dialog__title {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--t-main);
+}
+
+/* 消息提示：轻阴影圆角 */
+.el-message {
+  border-radius: var(--r-control);
+  box-shadow: var(--sh-pop);
+}
+
+.el-progress-bar__outer {
+  background-color: var(--bd-light);
+}

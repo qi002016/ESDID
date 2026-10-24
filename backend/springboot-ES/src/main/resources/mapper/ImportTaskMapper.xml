@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.heima.mapper.ImportTaskMapper">
+
+    <!-- 是否已有处理中的任务（全局）：A18 的 409 判定 -->
+    <select id="countProcessing" resultType="int">
+        SELECT COUNT(*) FROM import_task WHERE status = 'PROCESSING'
+    </select>
+
+    <!-- 同一文件（sha256）是否已有处理中的任务 -->
+    <select id="countProcessingByHash" resultType="int">
+        SELECT COUNT(*) FROM import_task WHERE file_hash = #{fileHash} AND status = 'PROCESSING'
+    </select>
+
+    <!-- 写入终态与统计结果 -->
+    <update id="finish">
+        UPDATE import_task
+        SET status     = #{status},
+            total_rows = #{totalRows},
+            valid_rows = #{validRows},
+            error_rows = #{errorRows},
+            end_time   = #{endTime},
+            fail_reason = #{failReason}
+        WHERE task_id = #{taskId}
+    </update>
+
+</mapper>

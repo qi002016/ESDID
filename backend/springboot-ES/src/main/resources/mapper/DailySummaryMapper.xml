@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.heima.mapper.DailySummaryMapper">
+
+    <!-- 删除某天结果，支持补跑 -->
+    <delete id="deleteByDate">
+        DELETE FROM daily_summary WHERE stat_date = #{statDate}
+    </delete>
+
+    <!-- INSERT ... SELECT：一次写入 4 组维度组合（品类 / 支付方式 / 用户类型 / 总计） -->
+    <insert id="insertFromOrders">
+        INSERT INTO daily_summary (stat_date, category, pay_type, user_type, order_count, total_sales, user_count)
+        SELECT #{statDate}, category, 'ALL', 'ALL',
+               COUNT(*), ROUND(SUM(total_amount), 2), COUNT(DISTINCT user_id)
+        FROM orders
+        WHERE order_time &gt;= #{statDate} AND order_time &lt; DATE_ADD(#{statDate}, INTERVAL 1 DAY)
+        GROUP BY category
+        UNION ALL
+        SELECT #{statDate}, 'ALL', pay_type, 'ALL',
+               COUNT(*), ROUND(SUM(total_amount), 2), COUNT(DISTINCT user_id)
+        FROM orders
+        WHERE order_time &gt;= #{statDate} AND order_time &lt; DATE_ADD(#{statDate}, INTERVAL 1 DAY)
+        GROUP BY pay_type
+        UNION ALL
+        SELECT #{statDate}, 'ALL', 'ALL', user_type,
+               COUNT(*), ROUND(SUM(total_amount), 2), COUNT(DISTINCT user_id)
+        FROM orders
+        WHERE order_time &gt;= #{statDate} AND order_time &lt; DATE_ADD(#{statDate}, INTERVAL 1 DAY)
+        GROUP BY user_type
+        UNION ALL
+        SELECT #{statDate}, 'ALL', 'ALL', 'ALL',
+               COUNT(*), ROUND(SUM(total_amount), 2), COUNT(DISTINCT user_id)
+        FROM orders
+        WHERE order_time &gt;= #{statDate} AND order_time &lt; DATE_ADD(#{statDate}, INTERVAL 1 DAY)
+    </insert>
+
+</mapper>

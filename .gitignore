@@ -1,0 +1,56 @@
+# ===== Node / 前端 =====
+node_modules/
+frontend/node_modules/
+dist/
+frontend/dist/
+.tmp-esbuild/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+dev-server.log
+
+# ===== Java / Maven =====
+target/
+*.class
+*.jar
+*.war
+!.mvn/wrapper/maven-wrapper.jar
+
+# ===== IDE / 编辑器 =====
+.idea/
+*.iml
+*.iws
+*.ipr
+.vscode/
+.project
+.classpath
+.settings/
+.factorypath
+.springBeans
+
+# ===== 操作系统 =====
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# ===== 缓存与 AI 工具工作目录 =====
+.npm-cache/
+.agents/
+.claude/
+.workbuddy-ai/
+ui-design-runs/
+
+# ===== 被解绑的嵌套 Git 仓库历史（不纳入外层仓库）=====
+.git_disabled/
+**/.git_disabled/
+
+# ===== 数据与构建产物 =====
+data/
+git/
+
+# ===== 临时日志与工具状态文件 =====
+error-log.md
+error2.md
+skills-lock.json
+style.json

@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.heima.mapper.SalesTargetMapper">
+
+    <!-- A13 销售目标列表：ALL 总目标优先 -->
+    <select id="listTargets" resultType="com.heima.domain.vo.TargetListVO$TargetVO">
+        SELECT id, category, target_amount AS targetAmount
+        FROM sales_target
+        WHERE period_type = #{periodType}
+          AND period_value = #{periodValue}
+        <if test="category != null and category != ''">
+            AND category = #{category}
+        </if>
+        ORDER BY (category = 'ALL') DESC, target_amount DESC
+    </select>
+
+</mapper>

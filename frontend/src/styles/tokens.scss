@@ -1,0 +1,66 @@
+/* ===========================================================================
+   设计令牌（Design Tokens）
+   视觉语言：墨纸账本 —— 暖纸底 + 墨色文字 + 矿物颜料语义色 + 发丝线分隔
+   克制、层次分明、有辨识度，避免默认 SaaS 后台的蓝灰卡片套件
+   =========================================================================== */
+:root {
+  /* ---- 语义色（矿物颜料命名） ---- */
+  --c-primary: #2c6e5d; /* 主色 黛青·墨绿 */
+  --c-primary-hover: #245c4e; /* 主色悬停 */
+  --c-success: #4c956c; /* 成功 竹青 */
+  --c-warning: #b97e1f; /* 警告 赭金 */
+  --c-danger: #c23b2e; /* 危险 朱砂 */
+  --c-purple: #7c5fa3; /* 辅助 藕紫 */
+  --c-cyan: #3e8b8f; /* 辅助 黛青 */
+
+  /* 主色的浅色派生（用于选中底色、弱化填充） */
+  --c-primary-50: rgba(44, 110, 93, 0.08);
+  --c-primary-100: rgba(44, 110, 93, 0.16);
+  --c-success-50: rgba(76, 149, 108, 0.1);
+  --c-danger-50: rgba(194, 59, 46, 0.1);
+  --c-warning-50: rgba(185, 126, 31, 0.1);
+
+  /* ---- 文本 ---- */
+  --t-main: #262a30;
+  --t-sub: #5f6670;
+  --t-muted: #8b929c;
+  --t-invert: #fdfcf8;
+
+  /* ---- 背景与描边（暖纸体系） ---- */
+  --bg-page: #f3f1ea;
+  --bg-card: #fdfcf8;
+  --bg-soft: #f7f5ef;
+  --bg-head: #f2f0e9;
+  --bg-sidebar: #242820; /* 暖墨（带绿调深色，区别于通用藏蓝） */
+  --bg-sidebar-hover: rgba(255, 255, 255, 0.05);
+  --bg-sidebar-active: rgba(44, 110, 93, 0.28);
+  --bd-base: #e2dfd5;
+  --bd-light: #ece9e0;
+
+  /* ---- 侧边栏 ---- */
+  --side-text: #a3aa9b;
+  --side-text-active: #f4f2ea;
+  --side-accent: #2c6e5d; /* 侧栏强调色：Logo 底、选中高亮条（与主色同族） */
+
+  /* ---- 圆角 ---- */
+  --r-card: 10px;
+  --r-control: 8px;
+  --r-pill: 999px;
+
+  /* ---- 阴影：以发丝线为主，阴影仅作极轻浮层 ---- */
+  --sh-card: 0 1px 0 rgba(38, 42, 48, 0.04);
+  --sh-hover: 0 1px 0 rgba(38, 42, 48, 0.05), 0 4px 14px rgba(38, 42, 48, 0.05);
+  --sh-pop: 0 8px 24px rgba(38, 42, 48, 0.1);
+
+  /* ---- 间距 ---- */
+  --sp-card: 24px;
+  --sp-gap: 16px;
+
+  /* ---- 字体 ---- */
+  --font-sans: 'Inter', 'Source Han Sans SC', 'Noto Sans SC', 'PingFang SC',
+    'Microsoft YaHei', system-ui, -apple-system, 'Segoe UI', sans-serif;
+
+  /* ---- 布局尺寸 ---- */
+  --w-sidebar: 220px;
+  --h-topbar: 48px;
+}

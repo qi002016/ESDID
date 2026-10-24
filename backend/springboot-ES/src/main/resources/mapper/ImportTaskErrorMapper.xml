@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.heima.mapper.ImportTaskErrorMapper">
+
+    <!-- 批量写入错误明细，避免逐条 insert -->
+    <insert id="batchInsert">
+        INSERT INTO import_task_error (task_id, row_no, field, message)
+        VALUES
+        <foreach collection="list" item="e" separator=",">
+            (#{e.taskId}, #{e.rowNo}, #{e.field}, #{e.message})
+        </foreach>
+    </insert>
+
+    <!-- A19：错误明细最多返回 limit 条（表里全量留存） -->
+    <select id="listByTaskId" resultType="com.heima.domain.vo.ImportTaskVO$ImportErrorVO">
+        SELECT row_no AS `row`, field, message
+        FROM import_task_error
+        WHERE task_id = #{taskId}
+        ORDER BY row_no ASC
+        LIMIT #{limit}
+    </select>
+
+</mapper>

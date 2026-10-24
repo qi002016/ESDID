@@ -1,0 +1,11 @@
+product_id,product_category_name,product_name_lenght,product_description_lenght,product_photos_qty,product_weight_g,product_length_cm,product_height_cm,product_width_cm
+p1,telefonia,42,287,1,225,20,15,10
+p2,informatica,55,512,2,1500,45,20,30
+p3,cama_mesa_banho,38,145,1,800,30,25,20
+p4,beleza_saude,60,320,1,300,15,15,10
+p5,eletrodomesticos,48,210,2,4200,50,35,40
+p6,alimentos,35,120,1,900,25,20,15
+p7,moda_calcados,50,180,1,700,32,12,22
+p8,informatica_acessorios,44,260,1,1100,40,15,25
+p9,,30,90,1,2100,60,40,35
+p10,moveis_decoracao,36,150,3,3300,70,30,45

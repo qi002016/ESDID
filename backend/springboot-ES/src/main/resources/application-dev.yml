@@ -1,0 +1,15 @@
+heima:
+  datasource:
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    host: 182.92.242.158
+    port: 3306
+    # 看板业务库（《后端开发文档》§8.1 命名）
+    database: ecommerce
+    username: root
+    password: 123456
+
+  redis:
+    host: 182.92.242.158
+    port: 6379
+    password:
+    database: 0
