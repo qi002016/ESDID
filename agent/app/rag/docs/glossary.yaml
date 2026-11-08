@@ -1,0 +1,161 @@
+# =============================================================
+# 业务词表（doc_type=glossary）
+# 作用：把运营/老板的口语词映射到字段与口径，解决"词不达意"
+# 例如"卖得怎么样"→ 销售额/订单量/客单价；"大促"→ promo_flag=1
+# =============================================================
+
+- id: gloss_sales_amount
+  term: 销售额 / GMV / 营收
+  definition: 订单金额总和，字段 orders.total_amount。GMV 与销售额在本项目中视为同一口径。
+  formula: SUM(total_amount)
+  tags: [销售额, GMV, 营收, 金额]
+
+- id: gloss_order_count
+  term: 订单数 / 单量
+  definition: 去重订单号数量，不是明细行数。
+  formula: COUNT(DISTINCT order_id)
+  tags: [订单数, 单量, 订单量]
+
+- id: gloss_aov
+  term: 客单价 / AOV
+  definition: 平均每单金额，衡量用户单次消费能力。
+  formula: SUM(total_amount) / COUNT(DISTINCT order_id)
+  tags: [客单价, AOV, 平均订单金额]
+
+- id: gloss_quantity
+  term: 销量 / 件数
+  definition: 卖出的商品件数总和，与订单数不同。
+  formula: SUM(quantity)
+  tags: [销量, 件数, 卖了多少]
+
+- id: gloss_category
+  term: 品类
+  definition: '商品所属大类，中文枚举（手机/电脑/家电/服饰/食品）。用户说"品类""类目""大类"都指它。'
+  formula: orders.category
+  tags: [品类, 类目, 大类, 分类]
+
+- id: gloss_new_user
+  term: 新客 / 新用户
+  definition: '下单时 user_type=''new'' 的用户；同一用户可能因打标规则多次成为"新客"。'
+  formula: COUNT(DISTINCT CASE WHEN user_type='new' THEN user_id END)
+  tags: [新客, 新用户, 拉新]
+
+- id: gloss_old_user
+  term: 老客 / 老用户
+  definition: 下单时 user_type='old' 的用户，通常指有过购买记录的用户。
+  formula: COUNT(DISTINCT CASE WHEN user_type='old' THEN user_id END)
+  tags: [老客, 老用户, 复购]
+
+- id: gloss_repeat_rate
+  term: 复购率
+  definition: 统计周期内下单≥2次的用户占下单用户的比例。
+  formula: 下单≥2次用户数 / 下单用户总数
+  tags: [复购率, 复购, 留存]
+
+- id: gloss_promo
+  term: 促销 / 活动 / 大促
+  definition: promo_flag=1 的订单；项目里没有具体活动ID，不能区分双11/618。
+  formula: promo_flag = 1
+  tags: [促销, 活动, 大促, 优惠]
+
+- id: gloss_achieve_rate
+  term: 达成率 / 完成率
+  definition: 实际销售额占目标销售额的比例。
+  formula: 实际销售额 / target_amount
+  tags: [达成率, 完成率, 目标]
+
+- id: gloss_mom
+  term: 环比 / 较上月
+  definition: 本期与上一个相邻周期对比，通常指月环比。
+  formula: (本期 - 上期) / 上期
+  tags: [环比, 月环比, 增长]
+
+- id: gloss_yoy
+  term: 同比 / 较去年
+  definition: 本期与去年同一周期对比。
+  formula: (本期 - 去年同期) / 去年同期
+  tags: [同比, 年同比, 增长]
+
+- id: gloss_high_value
+  term: 高价值用户 / 大客户
+  definition: 按累计消费额排序的头部用户，阈值由业务定义（如 TOP 10%）。
+  formula: 按 SUM(total_amount) 降序
+  tags: [高价值用户, 大客户, 头部用户]
+
+- id: gloss_churn
+  term: 流失用户
+  definition: 最近一次购买距数据锚点超过 90 天的用户；阈值可配置。
+  formula: DATEDIFF(MAX(order_time), 用户最近订单) > 90
+  tags: [流失, 流失用户, 召回]
+
+- id: gloss_active_user
+  term: 活跃用户 / DAU
+  definition: 统计周期内有下单行为的去重用户数；本项目不等于 App 日活。
+  formula: COUNT(DISTINCT user_id)
+  tags: [活跃用户, DAU, 日活]
+
+- id: gloss_hour
+  term: 时段 / 几点
+  definition: 按 order_time 的小时（0-23）分组。
+  formula: HOUR(order_time)
+  tags: [时段, 小时, 几点, 高峰]
+
+- id: gloss_region
+  term: 区域 / 省份 / 地区
+  definition: 收货省份字段 region，可能为空。
+  formula: orders.region
+  tags: [区域, 省份, 地区, 地理]
+
+- id: gloss_pay_type
+  term: 支付方式
+  definition: alipay 支付宝 / wechat 微信 / card 银行卡。
+  formula: orders.pay_type
+  tags: [支付方式, 支付宝, 微信, 银行卡]
+
+- id: gloss_price_band
+  term: 价格带 / 价位段
+  definition: 按商品单价划分的区间，分箱边界是业务定义。
+  formula: CASE WHEN price < ... THEN ...
+  tags: [价格带, 价位, 区间, 分箱]
+
+- id: gloss_topn
+  term: TOP N / 前N / 排名
+  definition: 按某指标降序取前 N 条，N 由用户指定，默认 10。
+  formula: ORDER BY metric DESC LIMIT N
+  tags: [TOP, 排名, 前N, 榜单]
+
+- id: gloss_share
+  term: 占比 / 贡献度 / 结构
+  definition: 分项金额除以总额，展示时乘 100 加百分号。
+  formula: 分项销售额 / 总销售额
+  tags: [占比, 贡献度, 结构, 份额]
+
+- id: gloss_daily_avg
+  term: 日均 / 平均每天
+  definition: 销售额除以统计天数；分母用有销售的天数还是自然日要说明。
+  formula: SUM(total_amount) / COUNT(DISTINCT DATE(order_time))
+  tags: [日均, 平均, 每天]
+
+- id: gloss_basket
+  term: 连带率 / 每单件数 / 购物篮
+  definition: 平均每单购买的商品件数，先按订单聚合再平均。
+  formula: AVG(每单 SUM(quantity))
+  tags: [连带率, 每单件数, 购物篮, 件数]
+
+- id: gloss_trend
+  term: 趋势 / 走势 / 变化
+  definition: 按时间粒度（天/周/月）聚合的指标序列，通常画折线图。
+  formula: GROUP BY 时间粒度 ORDER BY 时间
+  tags: [趋势, 走势, 变化, 折线图]
+
+- id: gloss_compare
+  term: 对比 / 差异
+  definition: 两个分组或两个时间段的指标并列比较，注意口径一致。
+  formula: GROUP BY 对比维度
+  tags: [对比, 差异, 比较]
+
+- id: gloss_data_anchor
+  term: 数据锚点
+  definition: '数据中最大的 order_time；"今天/上个月/最近7天"都相对它计算，避免空结果。'
+  formula: SELECT MAX(order_time) FROM orders
+  tags: [数据锚点, 时间, 相对时间, 最新数据]

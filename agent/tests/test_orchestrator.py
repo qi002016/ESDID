@@ -26,22 +26,26 @@ ANCHOR = "2026-12-31"
 
 
 def collect_events(session_id, question, monkeypatch=None):
-    """跑完整编排（async），通过 monkeypatch 把 SQL 执行替换为本地结果。"""
+    """跑完整编排（async），用假 GRAPH 隔离 LLM/DB，只验证编排层行为。"""
     if monkeypatch is not None:
         monkeypatch.setattr("app.orchestrator.get_data_anchor", lambda: ANCHOR)
 
-        class FakeExecuteTool:
-            """替代真实 execute_sql 工具：不连数据库，返回固定结果。"""
+        class FakeGraph:
+            """替代 LangGraph：按真实节点顺序 emit 事件，返回终态。"""
 
-            def invoke(self, args):
-                return json.dumps({
-                    "columns": ["category", "sales"],
-                    "rows": [{"category": "手机", "sales": 421000.0}],
-                    "dialect": "mysql",
-                })
+            def __init__(self):
+                self.seen = None
 
-        # 注意：不能给 pydantic 工具实例设属性，要替换整个模块引用
-        monkeypatch.setattr("app.orchestrator.execute_sql", FakeExecuteTool())
+            async def ainvoke(self, state):
+                self.seen = state
+                emit = state["emit"]
+                emit({"type": "thinking", "content": "分析问题"})
+                emit({"type": "sql", "content": "SELECT 1 LIMIT 1"})
+                return {**state, "answer": "ok", "sql": "SELECT 1 LIMIT 1", "charts": []}
+
+        fake = FakeGraph()
+        monkeypatch.setattr("app.orchestrator.GRAPH", fake)
+        collect_events.graph = fake
     return run_agent(session_id, question)
 
 
@@ -158,10 +162,10 @@ class TestOrchestrator:
 
     @pytest.mark.anyio
     async def test_session_memory_saved(self, monkeypatch):
-        """问答后应写入会话历史（供指代消解）"""
+        """编排层应把会话历史注入 state，供 generate 做指代消解"""
         async for _ in collect_events("sess_mem", "上个月销售额多少", monkeypatch):
             pass
-        from app.memory.redis_store import get_memory
-        history = get_memory().get_history("sess_mem")
-        assert any(m["role"] == "user" for m in history)
-        assert any(m["role"] == "assistant" for m in history)
+        state = collect_events.graph.seen
+        assert state["session_id"] == "sess_mem"
+        assert state["question"] == "上个月销售额多少"
+        assert isinstance(state["history"], list)

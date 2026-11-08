@@ -4,11 +4,8 @@
 
 **「上个月手机品类销售额环比变化多少」→ Agent 自动完成 理解问题 → 生成 SQL → 安全执行 → 分析数据 → 输出结论与图表。**
 
-> 本文档同时是
->
-> **Agent 开发教学手册**
->
-> ：第 6 章从 "为什么这样做" 的角度逐层拆解代码。
+> 检索链路与评测方法见 [docs/rag-evaluation.md](docs/rag-evaluation.md)：
+> 81 题召回集上，R@5 从 **0.778**（哈希词袋）提升到 **0.988**（BGE-M3 + rerank）。
 
 
 
@@ -22,20 +19,78 @@
 | Agent  | LangChain + DeepSeek                       | 双 Agent：SQL 生成 + 数据分析           |
 | 数据库 | MySQL（`ecommerce` 库）                    | 44375 条真实订单（2026 全年），只读执行 |
 | 记忆   | Redis                                      | 会话历史 / 结果缓存 / 限流              |
-| RAG    | Milvus（虚拟机 Docker）→ 本地向量检索兜底  | SQL 模板知识库                          |
+| RAG    | Milvus 2.4 + BGE-M3(1024d) + BM25 → RRF → rerank | SQL 模板/表结构/业务词/示例 四类知识库，97 条，alias 热切换 |
 | 安全   | sqlglot 解析校验 + 只读账号 + 超时 / LIMIT | 三层防线                                |
 | 前端   | 原生 HTML + ECharts                        | 对话面板，流式渲染                      |
+
+### 1.1 检索链路（RAG）
+
+```
+问题 → BGE-M3 embedding ─┐
+                         ├→ RRF(k=60, 权重 1.0/0.6) → rerank(top12) → MMR(λ=0.7)
+问题 → BM25(jieba/bigram)┘                                      ↓
+                                              类型配额：3 模板 + 2 表结构 + 2 业务词 + 1 示例
+                                                              ↓
+                                                     拼进 Prompt context
+```
+
+- **四类知识分层**：`template`（52 条可执行 SQL）、`schema_card`（4 张表结构）、
+  `glossary`（26 个业务口径）、`fewshot`（15 条完整问答），避免「模板挤掉表结构」。
+- **版本化集合 + alias**：`agent_knowledge_v{n}` 灌完再 `alter_alias` 切换，
+  重建知识库不中断线上读请求；启动时 `count>0` 只切 alias，不重复 embedding。
+- **可复现评测**：`python -m app.eval.run_retrieval` 跑五组消融，
+  输出 Recall@K / MRR / nDCG@5 与 p50/p95，报告落 `app/eval/reports/`。
+
+### 1.2 Agent 编排（LangGraph 状态机）
+
+```
+START → understand → clarify?  → retrieve → generate → critic? → execute → analyze → finalize → END
+                        │                        ↑          │
+                        └→ 澄清反问               └── fail ──┘（最多重试 2 次）
+```
+
+- **状态机而不是两段式**：`understand / retrieve / generate / critic / execute / analyze`
+  各自是一个节点，失败走条件边回退，重试次数由 `GRAPH_MAX_REPAIR` 控制。
+- **JSON 契约**：每个 LLM 节点输出 Pydantic 模型（`SQLPlan`、`CriticResult`、
+  `AnalystResult`），解析失败把错误原文回喂重试一次，不再用正则抠 JSON。
+- **自检 Critic**：生成后先用规则 + LLM 检查时间窗/过滤条件/聚合口径，
+  发现问题退回重生成；SQL 安全校验始终在 Critic 之前。
+- **流式输出**：节点通过 `emit` 回调推事件队列，编排层边跑边 `yield` SSE；
+  15s 无事件自动发心跳，避免长 SQL 让前端以为断流。
+
+### 1.3 效果评测
+
+`app/eval/` 下有一套可复现评测：79 题（64 可答 + 5 该澄清 + 5 无答案 + 5 注入），
+比的是**执行结果集**而不是 SQL 字符串。
+
+| 模式 | valid_sql | exec_accuracy | clarify | block | p50 | p95 |
+| --- | --- | --- | --- | --- | --- | --- |
+| 有 RAG | 100% | **90.6%** | 100% | 100% | 10.1s | 29.4s |
+| 无 RAG（消融） | 57.8% | 12.5% | 100% | 100% | 9.3s | 24.6s |
+
+同一套题只切掉检索，执行准确率 90.6% → 12.5%。同代码三次连跑为
+92.2% / 89.1% / 90.6%，**±1.5pt 抖动**，所以对外只说“约 90%”。
+方法、比对口径、失败聚类见 [docs/eval-methodology.md](docs/eval-methodology.md)。
 
 ## 2. 架构总览
 
 ```
-用户问题 → ① 前端(SSE) → ② Agent1 SQL生成(工具循环+自纠错)
-
-&#x20;           ↕ RAG模板(Milvus/本地)    ↕ 会话记忆(Redis)
-
-&#x20;        → ③ SQL安全校验(sqlglot) → ④ MySQL只读执行
-
-&#x20;        → ⑤ Agent2 数据分析 → ⑥ SSE 返回 answer + ECharts spec
+用户问题 → ① 前端(SSE) → ② FastAPI /api/chat
+                              │
+                              ▼
+                    LangGraph 状态机（单 Agent，多阶段）
+   understand ─(不清楚)─→ clarify_answer
+        │
+        ▼
+   retrieve（Milvus dense + BM25 → RRF → rerank → 配额）
+        │
+        ▼
+   generate ──(自检不过, ≤2 次)──→ generate
+        │
+        ▼
+   critic → execute(sqlglot 白名单 + 只读) → analyze → finalize
+        │                                            │
+        └──────────────(超范围)──→ give_up_answer     └→ SSE: thinking/sql/answer/chart/done
 ```
 
 一次问答链路（文档 §2.2 落地实现）：
@@ -183,7 +238,7 @@ agent/
 └── README.md
 ```
 
-## 6. 🎓 Agent 开发教学（为什么这样做）
+## 6. 设计决策（为什么这样做）
 
 ### 6.1 一句话理解 Agent
 

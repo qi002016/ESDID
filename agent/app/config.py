@@ -47,8 +47,37 @@ class Settings:
     # 温度：SQL 生成要低温度（确定性优先）
     llm_temperature: float = field(default_factory=lambda: float(_env("LLM_TEMPERATURE", "0")))
 
-    # ================= RAG（SQL 模板知识库） =================
-    rag_top_k: int = field(default_factory=lambda: int(_env("RAG_TOP_K", "4")))
+    # ================= Embedding（SiliconFlow BGE-M3） =================
+    # 为什么用 API 而不是本地模型：8G 显存要留给后面的 reranker 微调；
+    # embedding 只在灌库和查询时调用，API 成本可忽略（1M tokens ≈ 0.5 元）。
+    embedding_api_key: str = field(default_factory=lambda: _env("SILICONFLOW_API_KEY", ""))
+    embedding_base_url: str = field(default_factory=lambda: _env("EMBEDDING_BASE_URL", "https://api.siliconflow.cn/v1"))
+    embedding_model: str = field(default_factory=lambda: _env("EMBEDDING_MODEL", "BAAI/bge-m3"))
+    embedding_dim: int = field(default_factory=lambda: int(_env("EMBEDDING_DIM", "1024")))
+    embedding_batch_size: int = field(default_factory=lambda: int(_env("EMBEDDING_BATCH_SIZE", "16")))
+    embedding_cache_dir: str = field(
+        default_factory=lambda: _env("EMBEDDING_CACHE_DIR", os.path.join(BASE_DIR, ".cache", "embeddings"))
+    )
+
+    # ================= Rerank（BGE-Reranker，先用 API，W3 换本地微调版） =================
+    rerank_enabled: bool = field(default_factory=lambda: _env("RERANK_ENABLED", "true").lower() == "true")
+    rerank_api_key: str = field(default_factory=lambda: _env("RERANK_API_KEY", ""))
+    rerank_base_url: str = field(default_factory=lambda: _env("RERANK_BASE_URL", "https://api.siliconflow.cn/v1"))
+    rerank_model: str = field(default_factory=lambda: _env("RERANK_MODEL", "BAAI/bge-reranker-v2-m3"))
+    rerank_top_n: int = field(default_factory=lambda: int(_env("RERANK_TOP_N", "12")))
+
+    # ================= RAG 检索参数（dense + BM25 + RRF + rerank + MMR） =================
+    rag_top_k: int = field(default_factory=lambda: int(_env("RAG_TOP_K", "8")))
+    rag_dense_top_k: int = field(default_factory=lambda: int(_env("RAG_DENSE_TOP_K", "50")))
+    rag_sparse_top_k: int = field(default_factory=lambda: int(_env("RAG_SPARSE_TOP_K", "50")))
+    rag_fusion_top_k: int = field(default_factory=lambda: int(_env("RAG_FUSION_TOP_K", "30")))
+    rrf_k: int = field(default_factory=lambda: int(_env("RRF_K", "60")))
+    mmr_lambda: float = field(default_factory=lambda: float(_env("MMR_LAMBDA", "0.7")))
+    # 按 doc_type 配额组装上下文：模板优先，其次是口径与字段解释
+    rag_quota_templates: int = field(default_factory=lambda: int(_env("RAG_QUOTA_TEMPLATES", "3")))
+    rag_quota_schema: int = field(default_factory=lambda: int(_env("RAG_QUOTA_SCHEMA", "2")))
+    rag_quota_glossary: int = field(default_factory=lambda: int(_env("RAG_QUOTA_GLOSSARY", "2")))
+    rag_quota_fewshot: int = field(default_factory=lambda: int(_env("RAG_QUOTA_FEWSHOT", "1")))
 
     # ================= MySQL（只读执行层） =================
     # 生产规范：必须使用只读账号 agent_ro，从权限上杜绝写操作
@@ -75,10 +104,16 @@ class Settings:
     # 不可达时自动降级到本地向量检索（milvus_use_local_fallback 控制）
     milvus_host: str = field(default_factory=lambda: _env("MILVUS_HOST", "192.168.96.129"))
     milvus_port: int = field(default_factory=lambda: int(_env("MILVUS_PORT", "19530")))
-    milvus_collection: str = field(default_factory=lambda: _env("MILVUS_COLLECTION", "sql_templates"))
+    milvus_collection: str = field(default_factory=lambda: _env("MILVUS_COLLECTION", "agent_knowledge"))
+    # 版本化集合 + alias 热切换：灌新库时旧集合照常服务，切 alias 是原子操作
+    milvus_collection_version: int = field(default_factory=lambda: int(_env("MILVUS_COLLECTION_VERSION", "1")))
+    milvus_alias: str = field(default_factory=lambda: _env("MILVUS_ALIAS", "agent_knowledge"))
     milvus_use_local_fallback: bool = field(
         default_factory=lambda: _env("MILVUS_USE_LOCAL_FALLBACK", "true").lower() == "true"
     )
+    milvus_hnsw_m: int = field(default_factory=lambda: int(_env("MILVUS_HNSW_M", "16")))
+    milvus_ef_construction: int = field(default_factory=lambda: int(_env("MILVUS_EF_CONSTRUCTION", "200")))
+    milvus_search_ef: int = field(default_factory=lambda: int(_env("MILVUS_SEARCH_EF", "64")))
 
     # ================= 业务与安全参数 =================
     max_rows: int = field(default_factory=lambda: int(_env("MAX_ROWS", "1000")))  # 结果行数上限
@@ -88,6 +123,13 @@ class Settings:
     rate_limit_per_min: int = field(default_factory=lambda: int(_env("RATE_LIMIT", "30")))
     sql_retry_times: int = field(default_factory=lambda: int(_env("SQL_RETRY_TIMES", "3")))  # 自纠错轮数
     audit_log_max: int = field(default_factory=lambda: int(_env("AUDIT_LOG_MAX", "500")))
+
+    # ================= LangGraph 编排 =================
+    # 生成 → 自检 → 执行 任一步失败，最多回到 generate 的次数
+    graph_max_repair: int = field(default_factory=lambda: int(_env("GRAPH_MAX_REPAIR", "2")))
+    # SQL 自检节点：多一次 LLM 调用换更低的有效 SQL 错误率，可按需关闭
+    enable_critic: bool = field(default_factory=lambda: _env("ENABLE_CRITIC", "true").lower() == "true")
+    llm_timeout: int = field(default_factory=lambda: int(_env("LLM_TIMEOUT", "60")))
 
     # ================= 数据时间锚点 =================
     # 数据不是实时同步的：Agent 计算"上个月/最近7天"时，应基于数据里最大的 order_time，

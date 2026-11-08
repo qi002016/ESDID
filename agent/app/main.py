@@ -16,7 +16,9 @@ main.py — FastAPI 入口：SSE 对话接口 + 管理接口
 
 import asyncio
 import json
+import os
 import sys
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -28,16 +30,29 @@ from app import db
 from app.memory.postgres_store import get_history_mode, get_history_store
 from app.memory.redis_store import get_memory, get_memory_mode
 from app.orchestrator import run_agent
+from app.rag.ingest import ensure_ready
 from app.rag.vector_store import get_store_mode, init_templates
 from app.tools.sql_tools import get_audit_logs
 
-app = FastAPI(title="电商看板 Text-to-SQL 双 Agent", version="1.0.0")
 
-# 允许前端跨域（本地开发）
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    """启动：知识库有数据就只切 alias，空库才灌（不阻塞、不重复付费）。"""
+    info = await asyncio.to_thread(ensure_ready)
+    action = "已灌库" if info.get("ingested") else "已就绪（跳过灌库）"
+    print(f"[startup] 知识库{action}：{info.get('count')} 条，"
+          f"存储={info.get('mode')}，集合={info.get('collection')}")
+    yield
+
+
+app = FastAPI(title="电商看板 Text-to-SQL 双 Agent", version="1.1.0", lifespan=lifespan)
+
+# 允许前端跨域（本地开发；生产用 CORS_ORIGINS 收窄）
+_origins = [o.strip() for o in os.getenv("CORS_ORIGINS", "*").split(",") if o.strip()]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
+    allow_origins=_origins,
+    allow_methods=["GET", "POST"],
     allow_headers=["*"],
 )
 
@@ -45,13 +60,6 @@ app.add_middleware(
 class ChatRequest(BaseModel):
     session_id: str
     message: str
-
-
-@app.on_event("startup")
-async def startup():
-    """启动时：灌入 SQL 模板库（幂等）。"""
-    n = init_templates()
-    print(f"[startup] SQL 模板库就绪：{n} 个模板（存储：{get_store_mode()}）")
 
 
 @app.post("/chat")
@@ -82,17 +90,21 @@ async def chat(req: ChatRequest):
     )
 
 
+async def _probe(fn, timeout: float = 3.0):
+    """在线程里跑一次探测并限时，超时/异常都算不可用 —— 健康检查不能把主线程拖死。"""
+    try:
+        return await asyncio.wait_for(asyncio.to_thread(fn), timeout=timeout)
+    except Exception:
+        return None
+
+
 @app.get("/health")
 async def health():
-    """健康检查：MySQL / Redis / 向量库 / 历史库 连通性 + 数据概况。"""
-    db_info = db.ping()
-    redis_ok = True
-    try:
-        get_memory().get_history("__health__")
-    except Exception:
-        redis_ok = False
-    # 触发一次历史库探测（首次调用会初始化连接）
-    get_history_store()
+    """健康检查：MySQL / Redis / Milvus / 历史库，任一依赖挂掉都只降级、不阻塞。"""
+    db_info = await _probe(db.ping, timeout=5) or {"connected": False}
+    redis_ok = (await _probe(lambda: get_memory().get_history("__health__"))) is not None
+    # 历史库只在首次访问时探测；PG 不可达会 2s 内降级为 off
+    await _probe(get_history_store, timeout=3)
     return {
         "status": "ok" if db_info.get("connected") else "degraded",
         "db": db_info,
@@ -100,6 +112,7 @@ async def health():
         "vector_store": get_store_mode(),
         "history": get_history_mode(),
         "redis_reachable": redis_ok,
+        "rag_stage": "context",
     }
 
 

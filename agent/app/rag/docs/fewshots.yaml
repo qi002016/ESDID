@@ -1,0 +1,96 @@
+# =============================================================
+# Few-shot 示例（doc_type=fewshot）
+# 与模板的区别：模板是"骨架"，few-shot 是"完整问答对 + 推理过程"，
+# 用来教模型处理多条件组合、口径歧义和边界情况。
+# 检索时按问题相似度取 1~2 条拼进 prompt，不是全量塞入。
+# =============================================================
+
+- id: fs_promo_region_combo
+  question: 广东省上个月促销订单的销售额和客单价
+  sql: "SELECT COUNT(DISTINCT order_id) AS orders, ROUND(SUM(total_amount),2) AS sales, ROUND(SUM(total_amount)/COUNT(DISTINCT order_id),2) AS aov FROM orders WHERE region='广东' AND promo_flag=1 AND DATE_FORMAT(order_time,'%Y-%m')=DATE_FORMAT(DATE_SUB((SELECT MAX(order_time) FROM orders), INTERVAL 1 MONTH),'%Y-%m')"
+  reasoning: '三个条件（区域+促销+时间）AND 连接；"上个月"相对数据锚点；输出订单数/销售额/客单价三件套'
+  tags: [组合条件, 区域, 促销, 上个月, 客单价]
+
+- id: fs_ambiguous_sell_well
+  question: 手机卖得怎么样
+  sql: "SELECT ROUND(SUM(total_amount),2) AS sales, COUNT(DISTINCT order_id) AS orders, SUM(quantity) AS qty, ROUND(SUM(total_amount)/COUNT(DISTINCT order_id),2) AS aov FROM orders WHERE category='手机'"
+  reasoning: '"卖得怎么样"口径模糊，默认给销售额+订单数+销量+客单价四件套，并在回答里说明口径；不擅自选一个指标'
+  tags: [歧义, 手机, 卖得怎么样, 多指标]
+
+- id: fs_compare_two_months
+  question: 这个月和上个月比，家电品类销售额涨了多少
+  sql: "SELECT ROUND(SUM(CASE WHEN DATE_FORMAT(order_time,'%Y-%m')=DATE_FORMAT((SELECT MAX(order_time) FROM orders),'%Y-%m') THEN total_amount ELSE 0 END),2) AS cur_sales, ROUND(SUM(CASE WHEN DATE_FORMAT(order_time,'%Y-%m')=DATE_FORMAT(DATE_SUB((SELECT MAX(order_time) FROM orders), INTERVAL 1 MONTH),'%Y-%m') THEN total_amount ELSE 0 END),2) AS prev_sales FROM orders WHERE category='家电'"
+  reasoning: 条件聚合一次查出两期，避免两次查库；增长率在应用层算，上期为 0 时不显示百分比
+  tags: [环比, 两个月, 家电, 增长率]
+
+- id: fs_topn_with_filter
+  question: 服饰品类销售额前3的商品
+  sql: "SELECT product_name, ROUND(SUM(total_amount),2) AS sales FROM orders WHERE category='服饰' GROUP BY product_name ORDER BY sales DESC LIMIT 3"
+  reasoning: 先过滤品类再聚合商品，LIMIT 取用户指定的 3 而不是默认 10
+  tags: [TOP, 服饰, 商品, 前3]
+
+- id: fs_share_with_total
+  question: 新客销售额占整体的比例
+  sql: "SELECT ROUND(SUM(CASE WHEN user_type='new' THEN total_amount ELSE 0 END),2) AS new_sales, ROUND(SUM(total_amount),2) AS total_sales, ROUND(SUM(CASE WHEN user_type='new' THEN total_amount ELSE 0 END)/SUM(total_amount),4) AS new_share FROM orders"
+  reasoning: 占比用同一张表一次算出分子分母，避免两次查询口径漂移
+  tags: [占比, 新客, 整体, 份额]
+
+- id: fs_time_window_days
+  question: 最近7天的销售额和订单量
+  sql: "SELECT ROUND(SUM(total_amount),2) AS sales, COUNT(DISTINCT order_id) AS orders FROM orders WHERE order_time >= DATE_SUB((SELECT MAX(order_time) FROM orders), INTERVAL 6 DAY)"
+  reasoning: '"最近7天"包含锚点当天，所以减 6 天；用 DATE_SUB 而不是硬编码日期'
+  tags: [最近7天, 时间窗口, 销售额, 订单量]
+
+- id: fs_target_vs_actual
+  question: 6月销售目标完成了吗
+  sql: "SELECT t.period_value, t.target_amount, ROUND(SUM(o.total_amount),2) AS actual_sales, ROUND(SUM(o.total_amount)/t.target_amount,4) AS achieve_rate FROM sales_target t LEFT JOIN orders o ON DATE_FORMAT(o.order_time,'%Y-%m')=t.period_value AND o.category='ALL' WHERE t.category='ALL' AND t.period_type='month' AND t.period_value='2026-06' GROUP BY t.period_value, t.target_amount"
+  reasoning: 目标表 category='ALL' 取总目标；LEFT JOIN 保证目标存在但无销售时也能返回 0；月份是参数
+  tags: [目标, 达成率, 6月, 完成]
+
+- id: fs_rank_percent
+  question: 销售额前10%的商品贡献了多少销售额
+  sql: "SELECT ROUND(SUM(sales),2) AS top_sales, ROUND(SUM(sales)/(SELECT SUM(total_amount) FROM orders),4) AS contribution FROM (SELECT product_name, SUM(total_amount) AS sales FROM orders GROUP BY product_name ORDER BY sales DESC LIMIT 10) t"
+  reasoning: 简化实现：用 TOP 10 近似 TOP 10%（商品数少）；严谨做法用 NTILE(10) 分桶
+  tags: [TOP, 百分比, 贡献度, 商品]
+
+- id: fs_no_data_guard
+  question: 昨天新疆地区的销售额
+  sql: "SELECT ROUND(SUM(total_amount),2) AS sales, COUNT(DISTINCT order_id) AS orders FROM orders WHERE region='新疆' AND DATE(order_time)=DATE_SUB((SELECT MAX(order_time) FROM orders), INTERVAL 1 DAY)"
+  reasoning: '结果为空时不等于 0，要区分"没卖"和"没数据"；回答中说明数据锚点日期'
+  tags: [空结果, 区域, 昨天, 边界]
+
+- id: fs_multi_dimension
+  question: 各品类新客和老客的客单价对比
+  sql: "SELECT category, user_type, ROUND(SUM(total_amount)/COUNT(DISTINCT order_id),2) AS aov FROM orders GROUP BY category, user_type ORDER BY category, user_type"
+  reasoning: 两个维度交叉分组，结果行数 = 品类数 × 2；前端适合分组柱状图
+  tags: [交叉, 品类, 新客, 老客, 客单价]
+
+- id: fs_promo_lift
+  question: 促销让客单价提升了多少
+  sql: "SELECT ROUND(AVG(CASE WHEN promo_flag=1 THEN aov END),2) AS promo_aov, ROUND(AVG(CASE WHEN promo_flag=0 THEN aov END),2) AS normal_aov FROM (SELECT order_id, promo_flag, SUM(total_amount) AS aov FROM orders GROUP BY order_id, promo_flag) t"
+  reasoning: 先按订单算客单价再分组平均；直接 SUM/COUNT 在混合分组时会算错
+  tags: [促销, 提升, 客单价, 对比, 提升幅度]
+
+- id: fs_week_over_week
+  question: 这周比上周销售额增长多少
+  sql: "SELECT ROUND(SUM(CASE WHEN YEARWEEK(order_time,3)=YEARWEEK((SELECT MAX(order_time) FROM orders),3) THEN total_amount ELSE 0 END),2) AS cur_week, ROUND(SUM(CASE WHEN YEARWEEK(order_time,3)=YEARWEEK(DATE_SUB((SELECT MAX(order_time) FROM orders), INTERVAL 7 DAY),3) THEN total_amount ELSE 0 END),2) AS prev_week FROM orders"
+  reasoning: YEARWEEK(mode=3) 周一为周首；周环比与月环比逻辑一致，只是周期函数不同
+  tags: [周环比, 本周, 上周, 增长]
+
+- id: fs_category_contribution_change
+  question: 哪个品类对本月销售额增长的贡献最大
+  sql: "SELECT category, ROUND(SUM(CASE WHEN DATE_FORMAT(order_time,'%Y-%m')=DATE_FORMAT((SELECT MAX(order_time) FROM orders),'%Y-%m') THEN total_amount ELSE -total_amount END),2) AS delta FROM orders WHERE DATE_FORMAT(order_time,'%Y-%m') IN (DATE_FORMAT((SELECT MAX(order_time) FROM orders),'%Y-%m'), DATE_FORMAT(DATE_SUB((SELECT MAX(order_time) FROM orders), INTERVAL 1 MONTH),'%Y-%m')) GROUP BY category ORDER BY delta DESC"
+  reasoning: 增量贡献 = 本期 - 上期，按品类拆解；负贡献也要展示，不能只取正数
+  tags: [贡献, 增长, 品类, 环比, 拆解]
+
+- id: fs_hour_peak_by_category
+  question: 食品品类一天中哪个时段卖得最好
+  sql: "SELECT HOUR(order_time) AS h, ROUND(SUM(total_amount),2) AS sales FROM orders WHERE category='食品' GROUP BY h ORDER BY sales DESC LIMIT 1"
+  reasoning: 时段分析要先限定品类，不同品类高峰不同；LIMIT 1 直接给答案
+  tags: [时段, 高峰, 食品, 品类]
+
+- id: fs_clarify_needed
+  question: 最近表现怎么样
+  sql: "SELECT ROUND(SUM(total_amount),2) AS sales, COUNT(DISTINCT order_id) AS orders, COUNT(DISTINCT user_id) AS users FROM orders WHERE order_time >= DATE_SUB((SELECT MAX(order_time) FROM orders), INTERVAL 6 DAY)"
+  reasoning: '"最近"没有明确窗口、"表现"没有明确指标 —— 应先反问"看最近7天还是30天？重点看销售额、订单量还是用户数？"；此 SQL 仅作为默认兜底'
+  tags: [澄清, 歧义, 最近, 表现]

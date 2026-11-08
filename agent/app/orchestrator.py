@@ -1,90 +1,82 @@
 """
-orchestrator.py — 双 Agent 编排层
-==================================
-这是"总导演"：把一次问答走完整个流水线
-  问题 → (历史+RAG) → Agent1 生成 SQL → 安全执行 → Agent2 分析 → 事件流输出
+orchestrator.py — LangGraph 编排层（v2）
+=======================================
+对外接口保持不变：`run_agent(session_id, question)` 仍是 async generator，
+上层 main.py 照旧包装成 SSE —— 前端零改动。
 
-设计要点：
-  1. 以 **async generator** 输出事件（thinking/sql/answer/chart/done），
-     上层 main.py 把它包装成 SSE 流，前端边收边渲染 —— 用户感知"流式"；
-  2. 任何一步失败都有兜底事件，绝不让 HTTP 连接崩溃；
-  3. Agent1 与 Agent2 通过抽象接口调用（llm.py），换模型不换编排。
+内部换成了状态机：
+    理解 → 检索 → 生成 → 自检 → 执行 → 分析 → 归档
+失败会沿条件边回到「生成」，最多 GRAPH_MAX_REPAIR 次。
+
+为什么用队列桥接：
+  LangGraph 节点是异步函数，但它不直接 yield 事件；这里让节点通过 `emit`
+  把事件塞进 asyncio.Queue，orchestrator 一边消费队列一边 `yield`，
+  既保留真实流式，又不用把整张图拆成手工流水线。
 """
 
+from __future__ import annotations
+
 import asyncio
-import json
 from typing import AsyncGenerator
 
 from app.config import settings
 from app.db import get_data_anchor
-from app.llm import get_analyst, get_sql_generator
-from app.memory.postgres_store import get_history_store
+from app.graph.build import GRAPH
 from app.memory.redis_store import get_memory
-from app.rag.vector_store import get_vector_store
-from app.tools.sql_tools import execute_sql, log_sql
+
+HEARTBEAT_SECONDS = 15
 
 
 async def run_agent(session_id: str, question: str) -> AsyncGenerator[dict, None]:
-    """一次完整问答。yield 的事件类型：thinking / sql / answer / chart / done。"""
     memory = get_memory()
-    store = get_vector_store()
+    history = memory.get_history(session_id)
 
-    # ---------- 1. 上下文准备 ----------
-    history = memory.get_history(session_id)  # 会话历史（指代消解）
-    data_anchor = get_data_anchor()  # 数据时间锚点
-    rag_hits = store.search(question, top_k=settings.rag_top_k)  # RAG 模板检索
-    yield {"type": "thinking", "content": "正在理解问题、检索知识库并生成查询…"}
+    queue: asyncio.Queue[dict] = asyncio.Queue()
 
-    # ---------- 2. Agent 1：自然语言 → 安全 SQL ----------
-    generator = get_sql_generator()
-    sql, err = await generator.generate(question, history, rag_hits, data_anchor)
+    def emit(event: dict) -> None:
+        queue.put_nowait(event)
 
-    if sql is None:
-        yield {"type": "answer",
-               "content": f"暂时无法将问题转为合法查询：{err}。\n建议换个问法，例如「上个月销售额是多少」「各品类占比」。"}
-        yield {"type": "done"}
-        return
+    state = {
+        "session_id": session_id,
+        "question": question,
+        "history": history,
+        "data_anchor": get_data_anchor(),
+        "attempts": 0,
+        "feedback": [],
+        "emit": emit,
+    }
 
-    yield {"type": "sql", "content": sql}  # 可选：向用户展示生成的 SQL
-    yield {"type": "thinking", "content": "正在执行查询并分析结果…"}
+    task = asyncio.create_task(GRAPH.ainvoke(state))
 
-    # ---------- 3. 执行（统一走工具：安全校验 + 缓存 + 只读） ----------
-    result = execute_sql.invoke({"sql": sql})
-    try:
-        parsed = json.loads(result)
-        if parsed.get("error"):
-            yield {"type": "answer", "content": f"查询执行未通过：{parsed['error']}\n可尝试换个问法。"}
-            yield {"type": "done"}
-            return
-    except json.JSONDecodeError:
-        yield {"type": "answer", "content": "查询结果解析失败，请重试。"}
-        yield {"type": "done"}
-        return
-
-    # ---------- 4. Agent 2：数据 → 洞察 + 图表 ----------
-    analyst = get_analyst()
-    payload = await analyst.analyze(question, sql, result)
-
-    answer = payload.get("answer") or "（分析器未返回有效结论）"
-    charts = payload.get("charts") or []
-    yield {"type": "answer", "content": answer}
-    for chart in charts:
-        yield {"type": "chart", "content": chart}
-
-    # ---------- 5. 写回记忆 ----------
-    memory.save_turn(session_id, question, answer)
-    log_sql(sql, sql, ok=True, note="orchestrator executed")
-
-    # ---------- 6. 历史归档（PostgreSQL） ----------
-    # 教学点：归档是"尽力而为"——PG 不可达时静默降级，不阻断对话；
-    # to_thread 把同步 DB 写放到线程池，避免阻塞事件循环（IO 不卡主线程）。
-    history = get_history_store()
-    if history is not None:
+    # ---- 1) 边跑边推事件（带心跳，避免长时间无输出被网关掐断）----
+    while True:
+        if task.done() and queue.empty():
+            break
         try:
-            await asyncio.to_thread(
-                history.append_turn, session_id, question, answer, sql, charts
-            )
-        except Exception as e:
-            print(f"[history] 落库失败（不影响对话）：{e}")
+            event = await asyncio.wait_for(queue.get(), timeout=HEARTBEAT_SECONDS)
+            yield event
+        except asyncio.TimeoutError:
+            if task.done():
+                break
+            yield {"type": "thinking", "content": "仍在处理中…"}
+
+    # ---- 2) 收尾：异常兜底 ----
+    try:
+        final = await task
+    except Exception as e:  # noqa: BLE001 - 任何未捕获异常都要转成可读回答
+        yield {"type": "answer", "content": f"服务内部错误：{type(e).__name__}: {e}"}
+        yield {"type": "done"}
+        return
+
+    # ---- 3) 输出结论与图表 ----
+    answer = (final.get("answer") or "").strip()
+    caveats = final.get("caveats") or []
+    if caveats:
+        answer += "\n\n提示：" + "；".join(caveats)
+
+    if answer:
+        yield {"type": "answer", "content": answer}
+    for chart in final.get("charts") or []:
+        yield {"type": "chart", "content": chart}
 
     yield {"type": "done"}

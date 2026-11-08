@@ -1,0 +1,528 @@
+# =============================================================
+# SQL 模板知识库（doc_type=template）
+# 每条 = 一个可复用的查询骨架 + 业务口径 + 适用问题
+# 约定：
+#   - 时间锚点统一用 orders 表最大 order_time，避免"数据不是实时"导致空结果
+#   - 品类/时间/TOP N 是参数，生成时由 LLM 根据用户问题替换字面量
+#   - 金额单位：元；订单数用 COUNT(DISTINCT order_id)
+# =============================================================
+
+- id: tpl_kpi_overview
+  title: 整体销售 KPI（销售额/订单数/客单价）
+  question: 本月整体销售额、订单数、客单价分别是多少
+  sql: "SELECT ROUND(SUM(total_amount),2) AS total_sales, COUNT(DISTINCT order_id) AS order_count, ROUND(SUM(total_amount)/COUNT(DISTINCT order_id),2) AS avg_order_value FROM orders WHERE order_time >= DATE_FORMAT((SELECT MAX(order_time) FROM orders), '%Y-%m-01')"
+  business_note: 客单价 = 销售额 / 订单数；订单数必须 COUNT(DISTINCT order_id)，不能 COUNT(*)
+  intent: kpi
+  category: ALL
+  difficulty: easy
+  tags: [KPI, 总览, 销售额, 订单数, 客单价]
+
+- id: tpl_kpi_by_month
+  title: 指定月份销售 KPI
+  question: 上个月销售额、订单量、客单价是多少
+  sql: "SELECT DATE_FORMAT(order_time,'%Y-%m') AS month, ROUND(SUM(total_amount),2) AS total_sales, COUNT(DISTINCT order_id) AS order_count, ROUND(SUM(total_amount)/COUNT(DISTINCT order_id),2) AS aov FROM orders WHERE DATE_FORMAT(order_time,'%Y-%m') = DATE_FORMAT(DATE_SUB(DATE((SELECT MAX(order_time) FROM orders)), INTERVAL 1 MONTH),'%Y-%m') GROUP BY month"
+  business_note: '"上个月" 相对数据锚点（最大 order_time）计算，不是相对系统当天'
+  intent: kpi
+  category: ALL
+  difficulty: easy
+  tags: [KPI, 月度, 上个月]
+
+- id: tpl_kpi_by_category
+  title: 指定品类销售 KPI
+  question: 手机品类这个月的销售额和订单量是多少
+  sql: "SELECT category, ROUND(SUM(total_amount),2) AS total_sales, COUNT(DISTINCT order_id) AS order_count, ROUND(SUM(total_amount)/COUNT(DISTINCT order_id),2) AS aov FROM orders WHERE category = '手机' AND order_time >= DATE_FORMAT((SELECT MAX(order_time) FROM orders), '%Y-%m-01') GROUP BY category"
+  business_note: 品类值是中文枚举（手机/电脑/家电/服饰/食品 等），需要和库中实际值一致
+  intent: kpi
+  category: 手机
+  difficulty: easy
+  tags: [KPI, 品类, 手机]
+
+- id: tpl_daily_trend
+  title: 按天销售额趋势
+  question: 最近30天每天的销售额走势
+  sql: "SELECT DATE(order_time) AS d, ROUND(SUM(total_amount),2) AS sales, COUNT(DISTINCT order_id) AS orders FROM orders WHERE order_time >= DATE_SUB(DATE((SELECT MAX(order_time) FROM orders)), INTERVAL 29 DAY) GROUP BY d ORDER BY d"
+  business_note: 趋势图按天聚合；缺失日期不补零时前端折线会断开，必要时用日历表左连接
+  intent: trend
+  category: ALL
+  difficulty: easy
+  tags: [趋势, 按天, 近30天, 销售额]
+
+- id: tpl_weekly_trend
+  title: 按周销售额趋势
+  question: 最近8周每周的销售情况
+  sql: "SELECT YEARWEEK(order_time,3) AS yw, ROUND(SUM(total_amount),2) AS sales, COUNT(DISTINCT order_id) AS orders FROM orders WHERE order_time >= DATE_SUB(DATE((SELECT MAX(order_time) FROM orders)), INTERVAL 55 DAY) GROUP BY yw ORDER BY yw"
+  business_note: YEARWEEK(mode=3) 表示周一到周日，跨年周不会错位
+  intent: trend
+  category: ALL
+  difficulty: medium
+  tags: [趋势, 按周, 周同比, 销售额]
+
+- id: tpl_monthly_trend
+  title: 按月销售额趋势
+  question: 每个月的销售额变化趋势
+  sql: "SELECT DATE_FORMAT(order_time,'%Y-%m') AS month, ROUND(SUM(total_amount),2) AS sales, COUNT(DISTINCT order_id) AS orders FROM orders GROUP BY month ORDER BY month"
+  business_note: 月度趋势用于看大盘；跨年时按字符串排序仍正确（yyyy-MM）
+  intent: trend
+  category: ALL
+  difficulty: easy
+  tags: [趋势, 按月, 月度, 销售额]
+
+- id: tpl_top_products_sales
+  title: 销售额 TOP N 商品
+  question: 销售额最高的10个商品是哪些
+  sql: "SELECT product_name, ROUND(SUM(total_amount),2) AS sales, SUM(quantity) AS qty FROM orders GROUP BY product_name ORDER BY sales DESC LIMIT 10"
+  business_note: TOP N 的 N 由用户指定，默认10；销售额按行汇总 total_amount
+  intent: ranking
+  category: ALL
+  difficulty: easy
+  tags: [TOP, 商品, 销售额, 排名, 爆款]
+
+- id: tpl_top_products_qty
+  title: 销量 TOP N 商品
+  question: 卖得最多的商品是哪些，按销量排
+  sql: "SELECT product_name, SUM(quantity) AS qty, ROUND(SUM(total_amount),2) AS sales FROM orders GROUP BY product_name ORDER BY qty DESC LIMIT 10"
+  business_note: '销量 = SUM(quantity)，与销售额排名可能不一致，用户问"卖得多"要确认口径'
+  intent: ranking
+  category: ALL
+  difficulty: easy
+  tags: [TOP, 商品, 销量, 件数, 排名]
+
+- id: tpl_bottom_products
+  title: 销售额垫底商品
+  question: 销售额最低的10个商品是哪些
+  sql: "SELECT product_name, ROUND(SUM(total_amount),2) AS sales FROM orders GROUP BY product_name ORDER BY sales ASC LIMIT 10"
+  business_note: 垫底商品可能只是上架晚，需结合上架时间解释，不能直接判定为滞销
+  intent: ranking
+  category: ALL
+  difficulty: medium
+  tags: [垫底, 商品, 滞销, 销售额]
+
+- id: tpl_category_share
+  title: 各品类销售额占比
+  question: 各品类销售额占比是多少，哪个品类贡献最大
+  sql: "SELECT category, ROUND(SUM(total_amount),2) AS sales, ROUND(SUM(total_amount)/(SELECT SUM(total_amount) FROM orders),4) AS share FROM orders GROUP BY category ORDER BY sales DESC"
+  business_note: 占比分母是全量销售额；展示时乘100加百分号，保留2位小数
+  intent: share
+  category: ALL
+  difficulty: easy
+  tags: [占比, 品类, 贡献度, 结构]
+
+- id: tpl_category_rank
+  title: 品类销售额排名
+  question: 品类销售额排名，哪个品类卖得最好
+  sql: "SELECT category, ROUND(SUM(total_amount),2) AS sales, RANK() OVER (ORDER BY SUM(total_amount) DESC) AS rk FROM orders GROUP BY category ORDER BY rk"
+  business_note: 用窗口函数 RANK()，并列时名次相同；MySQL 8 支持
+  intent: ranking
+  category: ALL
+  difficulty: medium
+  tags: [排名, 品类, 销售额, RANK]
+
+- id: tpl_category_mom
+  title: 品类销售额环比
+  question: 各品类这个月相比上个月增长了多少
+  sql: "SELECT category, ROUND(SUM(CASE WHEN DATE_FORMAT(order_time,'%Y-%m')=DATE_FORMAT((SELECT MAX(order_time) FROM orders),'%Y-%m') THEN total_amount ELSE 0 END),2) AS cur_sales, ROUND(SUM(CASE WHEN DATE_FORMAT(order_time,'%Y-%m')=DATE_FORMAT(DATE_SUB(DATE((SELECT MAX(order_time) FROM orders)), INTERVAL 1 MONTH),'%Y-%m') THEN total_amount ELSE 0 END),2) AS prev_sales FROM orders GROUP BY category"
+  business_note: 环比 = (本期-上期)/上期；上期为0时返回 NULL，不要显示成 0% 或 100%
+  intent: growth
+  category: ALL
+  difficulty: hard
+  tags: [环比, 品类, 增长率, 月度对比]
+
+- id: tpl_category_yoy
+  title: 品类销售额同比
+  question: 各品类和去年同期相比增长如何
+  sql: "SELECT category, ROUND(SUM(CASE WHEN YEAR(order_time)=YEAR((SELECT MAX(order_time) FROM orders)) THEN total_amount ELSE 0 END),2) AS cur_sales, ROUND(SUM(CASE WHEN YEAR(order_time)=YEAR((SELECT MAX(order_time) FROM orders))-1 THEN total_amount ELSE 0 END),2) AS last_year_sales FROM orders GROUP BY category"
+  business_note: 同比要求数据覆盖去年同期；数据不足一年时结果不可解释，应提示用户
+  intent: growth
+  category: ALL
+  difficulty: hard
+  tags: [同比, 品类, 增长率, 年度对比]
+
+- id: tpl_region_share
+  title: 区域销售额占比
+  question: 各省份销售额占比分布
+  sql: "SELECT region, ROUND(SUM(total_amount),2) AS sales, ROUND(SUM(total_amount)/(SELECT SUM(total_amount) FROM orders),4) AS share FROM orders GROUP BY region ORDER BY sales DESC"
+  business_note: region 是收货省份，可能为 NULL（未填写），占比分母包含 NULL 会失真，需说明
+  intent: share
+  category: ALL
+  difficulty: medium
+  tags: [区域, 省份, 占比, 地理分布]
+
+- id: tpl_region_topn
+  title: 区域销售额 TOP N
+  question: 销售额最高的5个省份
+  sql: "SELECT region, ROUND(SUM(total_amount),2) AS sales FROM orders WHERE region IS NOT NULL GROUP BY region ORDER BY sales DESC LIMIT 5"
+  business_note: 区域 TOP N 要过滤 region IS NULL，否则空值会占一行
+  intent: ranking
+  category: ALL
+  difficulty: easy
+  tags: [区域, 省份, TOP, 排名]
+
+- id: tpl_region_mom
+  title: 区域销售额环比
+  question: 各省份这个月销售额环比变化
+  sql: "SELECT region, ROUND(SUM(CASE WHEN DATE_FORMAT(order_time,'%Y-%m')=DATE_FORMAT((SELECT MAX(order_time) FROM orders),'%Y-%m') THEN total_amount ELSE 0 END),2) AS cur_sales, ROUND(SUM(CASE WHEN DATE_FORMAT(order_time,'%Y-%m')=DATE_FORMAT(DATE_SUB(DATE((SELECT MAX(order_time) FROM orders)), INTERVAL 1 MONTH),'%Y-%m') THEN total_amount ELSE 0 END),2) AS prev_sales FROM orders GROUP BY region"
+  business_note: 区域环比用于发现区域异动；小样本区域波动大，需要同时看订单量
+  intent: growth
+  category: ALL
+  difficulty: hard
+  tags: [环比, 区域, 省份, 增长]
+
+- id: tpl_user_type_kpi
+  title: 新老客销售对比
+  question: 新客和老客的销售额、客单价对比
+  sql: "SELECT user_type, ROUND(SUM(total_amount),2) AS sales, ROUND(SUM(total_amount)/COUNT(DISTINCT order_id),2) AS aov FROM orders GROUP BY user_type"
+  business_note: user_type 是下单时标记（new/old），不是用户终身状态；新客定义取决于打标口径
+  intent: segment
+  category: ALL
+  difficulty: medium
+  tags: [新客, 老客, 用户分层, 客单价]
+
+- id: tpl_new_user_trend
+  title: 新客数量趋势
+  question: 最近30天每天的新客数走势
+  sql: "SELECT DATE(order_time) AS d, COUNT(DISTINCT user_id) AS new_users FROM orders WHERE user_type='new' AND order_time >= DATE_SUB(DATE((SELECT MAX(order_time) FROM orders)), INTERVAL 29 DAY) GROUP BY d ORDER BY d"
+  business_note: 新客按 user_type='new' 的订单去重用户数；同一用户多次标记 new 只算一次
+  intent: trend
+  category: ALL
+  difficulty: medium
+  tags: [新客, 趋势, 拉新, 用户增长]
+
+- id: tpl_repeat_rate
+  title: 复购率
+  question: 复购率是多少，有多少用户下过两单以上
+  sql: "SELECT ROUND(SUM(CASE WHEN cnt>=2 THEN 1 ELSE 0 END)/COUNT(*),4) AS repeat_rate, COUNT(*) AS total_users FROM (SELECT user_id, COUNT(DISTINCT order_id) AS cnt FROM orders GROUP BY user_id) t"
+  business_note: 复购率 = 下单≥2次用户数 / 总下单用户数；统计周期要说明（全周期 or 近90天）
+  intent: retention
+  category: ALL
+  difficulty: hard
+  tags: [复购率, 留存, 用户, 多次购买]
+
+- id: tpl_rfm_segment
+  title: RFM 用户分层
+  question: 按 RFM 分层（R≤30天且F≥3为高价值，R≤60天为潜力，R>90天且F≤1为流失，其余为一般），各层人数和销售额
+  sql: "SELECT CASE WHEN r_days<=30 AND f_cnt>=3 THEN '高价值' WHEN r_days<=60 THEN '潜力' WHEN r_days>90 AND f_cnt<=1 THEN '流失' ELSE '一般' END AS segment, COUNT(*) AS users, ROUND(SUM(money),2) AS sales FROM (SELECT user_id, DATEDIFF((SELECT MAX(order_time) FROM orders), MAX(order_time)) AS r_days, COUNT(DISTINCT order_id) AS f_cnt, SUM(total_amount) AS money FROM orders GROUP BY user_id) t GROUP BY segment"
+  business_note: R=最近一次购买距今天数，F=购买频次，M=累计金额；阈值是业务经验值，需要写进口径卡
+  intent: segment
+  category: ALL
+  difficulty: hard
+  tags: [RFM, 用户分层, 高价值, 流失, 留存]
+
+- id: tpl_high_value_users
+  title: 高价值用户 TOP N
+  question: 消费金额最高的20个用户
+  sql: "SELECT user_id, ROUND(SUM(total_amount),2) AS total_spend, COUNT(DISTINCT order_id) AS orders FROM orders GROUP BY user_id ORDER BY total_spend DESC LIMIT 20"
+  business_note: 高价值按累计消费额排序；用户ID是脱敏字符串，不要尝试反查个人信息
+  intent: ranking
+  category: ALL
+  difficulty: medium
+  tags: [高价值用户, TOP, 用户, 消费额]
+
+- id: tpl_active_users
+  title: 日活跃下单用户数
+  question: 最近30天每天有多少活跃用户下单
+  sql: "SELECT DATE(order_time) AS d, COUNT(DISTINCT user_id) AS active_users FROM orders WHERE order_time >= DATE_SUB(DATE((SELECT MAX(order_time) FROM orders)), INTERVAL 29 DAY) GROUP BY d ORDER BY d"
+  business_note: '这里"活跃"定义为当天下单用户；不等于 App 日活'
+  intent: trend
+  category: ALL
+  difficulty: easy
+  tags: [活跃用户, DAU, 日活, 趋势]
+
+- id: tpl_promo_effect
+  title: 促销活动效果对比
+  question: 促销订单和普通订单的销售额、客单价差多少
+  sql: "SELECT ROUND(SUM(CASE WHEN promo_flag=1 THEN total_amount ELSE 0 END),2) AS promo_sales, ROUND(SUM(CASE WHEN promo_flag=0 THEN total_amount ELSE 0 END),2) AS normal_sales, ROUND(SUM(CASE WHEN promo_flag=1 THEN total_amount ELSE 0 END)-SUM(CASE WHEN promo_flag=0 THEN total_amount ELSE 0 END),2) AS sales_diff, COUNT(DISTINCT CASE WHEN promo_flag=1 THEN order_id END) AS promo_orders, COUNT(DISTINCT CASE WHEN promo_flag=0 THEN order_id END) AS normal_orders, ROUND(SUM(CASE WHEN promo_flag=1 THEN total_amount ELSE 0 END)/NULLIF(COUNT(DISTINCT CASE WHEN promo_flag=1 THEN order_id END),0),2) AS promo_aov, ROUND(SUM(CASE WHEN promo_flag=0 THEN total_amount ELSE 0 END)/NULLIF(COUNT(DISTINCT CASE WHEN promo_flag=0 THEN order_id END),0),2) AS normal_aov FROM orders"
+  business_note: promo_flag=1 表示促销单；对比时要说明是否有同期促销，不能直接归因
+  intent: promo
+  category: ALL
+  difficulty: medium
+  tags: [促销, 活动, 效果, 对比, 客单价]
+
+- id: tpl_promo_share
+  title: 促销订单占比
+  question: 促销订单占比和促销销售额占比分别是多少
+  sql: "SELECT ROUND(SUM(CASE WHEN promo_flag=1 THEN 1 ELSE 0 END)/COUNT(DISTINCT order_id),4) AS promo_order_share, ROUND(SUM(CASE WHEN promo_flag=1 THEN total_amount ELSE 0 END)/SUM(total_amount),4) AS promo_sales_share FROM orders"
+  business_note: 订单数占比和销售额占比要分开算，两者含义不同
+  intent: promo
+  category: ALL
+  difficulty: medium
+  tags: [促销, 占比, 订单, 销售额]
+
+- id: tpl_promo_category
+  title: 各品类促销效果
+  question: 每个品类做促销和不做促销的销售额对比
+  sql: "SELECT category, ROUND(SUM(CASE WHEN promo_flag=1 THEN total_amount ELSE 0 END),2) AS promo_sales, ROUND(SUM(CASE WHEN promo_flag=0 THEN total_amount ELSE 0 END),2) AS normal_sales FROM orders GROUP BY category ORDER BY promo_sales DESC"
+  business_note: 品类促销效果受品类特性影响，食品/服饰通常更敏感
+  intent: promo
+  category: ALL
+  difficulty: medium
+  tags: [促销, 品类, 效果, 对比]
+
+- id: tpl_pay_type_share
+  title: 支付方式占比
+  question: 支付宝、微信、银行卡各占多少
+  sql: "SELECT pay_type, COUNT(DISTINCT order_id) AS orders, ROUND(SUM(total_amount),2) AS sales, ROUND(COUNT(DISTINCT order_id)/(SELECT COUNT(DISTINCT order_id) FROM orders),4) AS order_share FROM orders GROUP BY pay_type ORDER BY orders DESC"
+  business_note: pay_type 枚举 alipay/wechat/card；占比按订单数算，不是按金额
+  intent: share
+  category: ALL
+  difficulty: easy
+  tags: [支付方式, 占比, 支付宝, 微信, 银行卡]
+
+- id: tpl_pay_type_aov
+  title: 支付方式客单价
+  question: 不同支付方式的客单价差异
+  sql: "SELECT pay_type, ROUND(SUM(total_amount)/COUNT(DISTINCT order_id),2) AS aov, COUNT(DISTINCT order_id) AS orders FROM orders GROUP BY pay_type ORDER BY aov DESC"
+  business_note: 客单价差异可能来自品类结构，不是支付方式本身导致的
+  intent: segment
+  category: ALL
+  difficulty: medium
+  tags: [支付方式, 客单价, 对比]
+
+- id: tpl_price_band
+  title: 商品价格带分布
+  question: 商品价格带分布，哪个价位卖得最好
+  sql: "SELECT CASE WHEN price<100 THEN '0-100' WHEN price<500 THEN '100-500' WHEN price<1000 THEN '500-1000' WHEN price<3000 THEN '1000-3000' ELSE '3000+' END AS price_band, COUNT(DISTINCT order_id) AS orders, ROUND(SUM(total_amount),2) AS sales FROM orders GROUP BY price_band ORDER BY sales DESC"
+  business_note: 价格带按商品单价 price 分箱；分箱边界是业务定义，需要和运营确认
+  intent: distribution
+  category: ALL
+  difficulty: medium
+  tags: [价格带, 价位, 分布, 单价]
+
+- id: tpl_hourly_dist
+  title: 下单时段分布
+  question: 一天中各时间段的下单量分布
+  sql: "SELECT HOUR(order_time) AS h, COUNT(DISTINCT order_id) AS orders, ROUND(SUM(total_amount),2) AS sales FROM orders GROUP BY h ORDER BY h"
+  business_note: 时段按 0-23 点；可用于投放/客服排班，但要注意时区
+  intent: distribution
+  category: ALL
+  difficulty: easy
+  tags: [时段, 小时, 分布, 下单时间, 高峰]
+
+- id: tpl_weekday_dist
+  title: 星期分布
+  question: 周一到周日每天的销售额和订单量分布
+  sql: "SELECT DAYOFWEEK(order_time) AS dow, COUNT(DISTINCT order_id) AS orders, ROUND(SUM(total_amount),2) AS sales FROM orders GROUP BY dow ORDER BY dow"
+  business_note: DAYOFWEEK 1=周日 ... 7=周六；展示时建议转成中文星期
+  intent: distribution
+  category: ALL
+  difficulty: easy
+  tags: [星期, 周几, 分布, 周末]
+
+- id: tpl_aov_trend
+  title: 客单价趋势
+  question: 最近30天客单价的变化趋势
+  sql: "SELECT DATE(order_time) AS d, ROUND(SUM(total_amount)/COUNT(DISTINCT order_id),2) AS aov FROM orders WHERE order_time >= DATE_SUB(DATE((SELECT MAX(order_time) FROM orders)), INTERVAL 29 DAY) GROUP BY d ORDER BY d"
+  business_note: 客单价波动大时结合订单量看，避免被少数大额订单带偏
+  intent: trend
+  category: ALL
+  difficulty: medium
+  tags: [客单价, 趋势, 按天, AOV]
+
+- id: tpl_order_count_trend
+  title: 订单量趋势
+  question: 最近30天每天有多少订单
+  sql: "SELECT DATE(order_time) AS d, COUNT(DISTINCT order_id) AS orders FROM orders WHERE order_time >= DATE_SUB(DATE((SELECT MAX(order_time) FROM orders)), INTERVAL 29 DAY) GROUP BY d ORDER BY d"
+  business_note: 订单量 = COUNT(DISTINCT order_id)；若一单多商品，不能 COUNT(*)
+  intent: trend
+  category: ALL
+  difficulty: easy
+  tags: [订单量, 趋势, 按天, 订单数]
+
+- id: tpl_mom_growth
+  title: 整体销售额环比
+  question: 这个月销售额比上个月增长了多少
+  sql: "SELECT ROUND(SUM(CASE WHEN DATE_FORMAT(order_time,'%Y-%m')=DATE_FORMAT((SELECT MAX(order_time) FROM orders),'%Y-%m') THEN total_amount ELSE 0 END),2) AS cur_sales, ROUND(SUM(CASE WHEN DATE_FORMAT(order_time,'%Y-%m')=DATE_FORMAT(DATE_SUB(DATE((SELECT MAX(order_time) FROM orders)), INTERVAL 1 MONTH),'%Y-%m') THEN total_amount ELSE 0 END),2) AS prev_sales FROM orders"
+  business_note: 环比增长率 = (本期-上期)/上期；上期为0时无定义
+  intent: growth
+  category: ALL
+  difficulty: medium
+  tags: [环比, 增长率, 月度, 销售额]
+
+- id: tpl_yoy_growth
+  title: 整体销售额同比
+  question: 今年和去年同期的销售额对比
+  sql: "SELECT ROUND(SUM(CASE WHEN YEAR(order_time)=YEAR((SELECT MAX(order_time) FROM orders)) THEN total_amount ELSE 0 END),2) AS cur_sales, ROUND(SUM(CASE WHEN YEAR(order_time)=YEAR((SELECT MAX(order_time) FROM orders))-1 THEN total_amount ELSE 0 END),2) AS last_year_sales FROM orders"
+  business_note: 同比受季节性和大促影响，最好同月对比而不是全年对比
+  intent: growth
+  category: ALL
+  difficulty: medium
+  tags: [同比, 年度, 增长率, 销售额]
+
+- id: tpl_target_achievement
+  title: 月度销售目标达成率
+  question: 各月销售目标完成率分别是多少
+  sql: "SELECT t.period_value, t.target_amount, ROUND(o.actual_sales,2) AS actual_sales, ROUND(o.actual_sales/t.target_amount,4) AS achieve_rate FROM sales_target t JOIN (SELECT DATE_FORMAT(order_time,'%Y-%m') AS m, SUM(total_amount) AS actual_sales FROM orders GROUP BY m) o ON o.m=t.period_value WHERE t.category='ALL' AND t.period_type='month'"
+  business_note: 达成率 = 实际销售额 / 目标销售额；目标表 category='ALL' 是总目标
+  intent: target
+  category: ALL
+  difficulty: hard
+  tags: [目标, 达成率, 完成率, KPI, 销售目标]
+
+- id: tpl_target_gap
+  title: 目标缺口分析
+  question: 各月销售目标、实际销售额和缺口分别是多少
+  sql: "SELECT t.period_value AS month, t.target_amount, ROUND(o.actual_sales,2) AS actual_sales, ROUND(t.target_amount-o.actual_sales,2) AS gap FROM sales_target t JOIN (SELECT DATE_FORMAT(order_time,'%Y-%m') AS month, SUM(total_amount) AS actual_sales FROM orders GROUP BY month) o ON o.month=t.period_value WHERE t.period_type='month' AND t.category='ALL' ORDER BY month"
+  business_note: 缺口 = 目标 - 实际；日均需完成 = 缺口 / 剩余天数，剩余天数要用数据锚点算
+  intent: target
+  category: ALL
+  difficulty: hard
+  tags: [目标, 缺口, 差额, 达成, 日均]
+
+- id: tpl_target_by_category
+  title: 品类目标达成
+  question: 各品类本月销售目标完成情况
+  sql: "SELECT t.category, t.target_amount, ROUND(COALESCE(o.actual_sales,0),2) AS actual_sales, ROUND(COALESCE(o.actual_sales,0)/NULLIF(t.target_amount,0),4) AS achieve_rate FROM sales_target t LEFT JOIN (SELECT category, DATE_FORMAT(order_time,'%Y-%m') AS month, SUM(total_amount) AS actual_sales FROM orders GROUP BY category, month) o ON o.category=t.category AND o.month=t.period_value WHERE t.period_type='month' AND t.category<>'ALL' AND t.period_value=DATE_FORMAT((SELECT MAX(order_time) FROM orders),'%Y-%m') ORDER BY achieve_rate DESC"
+  business_note: 品类目标表按 (period, category) 唯一；LEFT JOIN 保证没卖出的品类也显示 0
+  intent: target
+  category: ALL
+  difficulty: hard
+  tags: [目标, 品类, 达成率, 完成情况]
+
+- id: tpl_daily_avg
+  title: 日均销售额
+  question: 平均每天卖多少钱
+  sql: "SELECT ROUND(SUM(total_amount)/COUNT(DISTINCT DATE(order_time)),2) AS daily_avg_sales FROM orders"
+  business_note: 分母是有销售的天数，不是自然日天数；两种口径要说明
+  intent: kpi
+  category: ALL
+  difficulty: medium
+  tags: [日均, 平均值, 销售额, 每天]
+
+- id: tpl_peak_day
+  title: 销售额最高的一天
+  question: 哪一天销售额最高，卖了多少
+  sql: "SELECT DATE(order_time) AS d, ROUND(SUM(total_amount),2) AS sales FROM orders GROUP BY d ORDER BY sales DESC LIMIT 1"
+  business_note: 峰值日通常对应大促，回答时应提示是否为活动日
+  intent: ranking
+  category: ALL
+  difficulty: easy
+  tags: [峰值, 最高, 单日, 销售额, 大促]
+
+- id: tpl_peak_hour
+  title: 销售额最高的时段
+  question: 哪个小时段的销售额最高
+  sql: "SELECT HOUR(order_time) AS h, ROUND(SUM(total_amount),2) AS sales FROM orders GROUP BY h ORDER BY sales DESC LIMIT 1"
+  business_note: 高峰时段用于投放和客服排班；不同品类高峰可能不同
+  intent: ranking
+  category: ALL
+  difficulty: easy
+  tags: [高峰, 时段, 小时, 销售额]
+
+- id: tpl_basket_items
+  title: 平均每单商品件数
+  question: 平均每单买几件商品
+  sql: "SELECT ROUND(AVG(qty),2) AS avg_items_per_order FROM (SELECT order_id, SUM(quantity) AS qty FROM orders GROUP BY order_id) t"
+  business_note: '先按订单聚合再求平均；直接 AVG(quantity) 是"每行商品件数"，口径错误'
+  intent: kpi
+  category: ALL
+  difficulty: hard
+  tags: [件数, 每单, 购物篮, 平均, 连带率]
+
+- id: tpl_category_aov
+  title: 品类客单价
+  question: 各品类的客单价是多少
+  sql: "SELECT category, ROUND(SUM(total_amount)/COUNT(DISTINCT order_id),2) AS aov FROM orders GROUP BY category ORDER BY aov DESC"
+  business_note: 品类客单价 = 品类销售额 / 品类订单数
+  intent: kpi
+  category: ALL
+  difficulty: medium
+  tags: [品类, 客单价, AOV, 对比]
+
+- id: tpl_category_order_count
+  title: 品类订单量
+  question: 每个品类有多少订单
+  sql: "SELECT category, COUNT(DISTINCT order_id) AS orders FROM orders GROUP BY category ORDER BY orders DESC"
+  business_note: '订单量与销量（件数）是两个指标，用户问"卖了多少"时要澄清'
+  intent: kpi
+  category: ALL
+  difficulty: easy
+  tags: [品类, 订单量, 销量, 件数]
+
+- id: tpl_region_category_matrix
+  title: 区域×品类交叉分析
+  question: 每个省份各品类的销售额分布
+  sql: "SELECT region, category, ROUND(SUM(total_amount),2) AS sales FROM orders WHERE region IS NOT NULL GROUP BY region, category ORDER BY region, sales DESC"
+  business_note: 交叉表用于找区域品类机会；行数可能较多，前端需要透视表或热力图
+  intent: cross
+  category: ALL
+  difficulty: medium
+  tags: [交叉, 区域, 品类, 矩阵, 透视]
+
+- id: tpl_cumulative_sales
+  title: 累计销售额
+  question: 今年每月累计销售额走势如何
+  sql: "SELECT DATE_FORMAT(order_time,'%Y-%m') AS month, ROUND(SUM(SUM(total_amount)) OVER (ORDER BY DATE_FORMAT(order_time,'%Y-%m')),2) AS cum_sales FROM orders WHERE YEAR(order_time)=YEAR((SELECT MAX(order_time) FROM orders)) GROUP BY month ORDER BY month"
+  business_note: 窗口函数累计求和；按月累计，日期列要是月份而不是订单行
+  intent: trend
+  category: ALL
+  difficulty: hard
+  tags: [累计, 累计销售额, 窗口函数, 走势]
+
+- id: tpl_running_7d
+  title: 7日滚动销售额
+  question: 最近7天的滚动平均销售额走势
+  sql: "SELECT d, ma7 FROM (SELECT d, ROUND(AVG(sales) OVER (ORDER BY d ROWS BETWEEN 6 PRECEDING AND CURRENT ROW),2) AS ma7 FROM (SELECT DATE(order_time) AS d, SUM(total_amount) AS sales FROM orders GROUP BY d) t) x WHERE d >= DATE_SUB(DATE((SELECT MAX(order_time) FROM orders)), INTERVAL 6 DAY) ORDER BY d"
+  business_note: 滚动窗口用于平滑波动；前6天窗口不完整，需标注
+  intent: trend
+  category: ALL
+  difficulty: hard
+  tags: [滚动, 7日, 移动平均, 平滑, 趋势]
+
+- id: tpl_multi_metric
+  title: 多指标环比汇总
+  question: 这个月和上个月的销售额、订单量、客单价对比
+  sql: "SELECT ROUND(SUM(CASE WHEN DATE_FORMAT(order_time,'%Y-%m')=DATE_FORMAT((SELECT MAX(order_time) FROM orders),'%Y-%m') THEN total_amount ELSE 0 END),2) AS cur_sales, COUNT(DISTINCT CASE WHEN DATE_FORMAT(order_time,'%Y-%m')=DATE_FORMAT((SELECT MAX(order_time) FROM orders),'%Y-%m') THEN order_id END) AS cur_orders, ROUND(SUM(CASE WHEN DATE_FORMAT(order_time,'%Y-%m')=DATE_FORMAT((SELECT MAX(order_time) FROM orders),'%Y-%m') THEN total_amount ELSE 0 END)/NULLIF(COUNT(DISTINCT CASE WHEN DATE_FORMAT(order_time,'%Y-%m')=DATE_FORMAT((SELECT MAX(order_time) FROM orders),'%Y-%m') THEN order_id END),0),2) AS cur_aov, ROUND(SUM(CASE WHEN DATE_FORMAT(order_time,'%Y-%m')=DATE_FORMAT(DATE_SUB(DATE((SELECT MAX(order_time) FROM orders)), INTERVAL 1 MONTH),'%Y-%m') THEN total_amount ELSE 0 END),2) AS prev_sales, COUNT(DISTINCT CASE WHEN DATE_FORMAT(order_time,'%Y-%m')=DATE_FORMAT(DATE_SUB(DATE((SELECT MAX(order_time) FROM orders)), INTERVAL 1 MONTH),'%Y-%m') THEN order_id END) AS prev_orders, ROUND(SUM(CASE WHEN DATE_FORMAT(order_time,'%Y-%m')=DATE_FORMAT(DATE_SUB(DATE((SELECT MAX(order_time) FROM orders)), INTERVAL 1 MONTH),'%Y-%m') THEN total_amount ELSE 0 END)/NULLIF(COUNT(DISTINCT CASE WHEN DATE_FORMAT(order_time,'%Y-%m')=DATE_FORMAT(DATE_SUB(DATE((SELECT MAX(order_time) FROM orders)), INTERVAL 1 MONTH),'%Y-%m') THEN order_id END),0),2) AS prev_aov FROM orders"
+  business_note: 多指标同表输出，方便一次对比；环比计算在应用层或 SQL 外层做
+  intent: kpi
+  category: ALL
+  difficulty: medium
+  tags: [多指标, 环比, 对比, 销售额, 订单量, 客单价]
+
+- id: tpl_quarter_summary
+  title: 季度销售汇总
+  question: 每个季度的销售额和订单量
+  sql: "SELECT CONCAT(YEAR(order_time),'-Q',QUARTER(order_time)) AS quarter, ROUND(SUM(total_amount),2) AS sales, COUNT(DISTINCT order_id) AS orders FROM orders GROUP BY quarter ORDER BY quarter"
+  business_note: 季度按自然季度；跨年季度排序用字符串仍正确
+  intent: trend
+  category: ALL
+  difficulty: medium
+  tags: [季度, 汇总, 销售额, 订单量]
+
+- id: tpl_category_price_band
+  title: 品类价格带分布
+  question: 手机品类各价格带的销量分布
+  sql: "SELECT CASE WHEN price<1000 THEN '0-1000' WHEN price<3000 THEN '1000-3000' WHEN price<5000 THEN '3000-5000' ELSE '5000+' END AS band, SUM(quantity) AS qty, ROUND(SUM(total_amount),2) AS sales FROM orders WHERE category='手机' GROUP BY band ORDER BY sales DESC"
+  business_note: 品类价格带边界因品类而异，手机和食品不能用同一套分箱
+  intent: distribution
+  category: 手机
+  difficulty: medium
+  tags: [品类, 价格带, 手机, 分布, 销量]
+
+- id: tpl_user_avg_orders
+  title: 人均订单数
+  question: 平均每个用户下几单
+  sql: "SELECT ROUND(AVG(cnt),2) AS avg_orders_per_user FROM (SELECT user_id, COUNT(DISTINCT order_id) AS cnt FROM orders GROUP BY user_id) t"
+  business_note: 人均订单数 = 总订单数 / 去重用户数；与复购率一起看更完整
+  intent: kpi
+  category: ALL
+  difficulty: medium
+  tags: [人均, 订单数, 用户, 平均]
+
+- id: tpl_category_top_products
+  title: 品类内 TOP 商品
+  question: 手机品类销售额最高的5个商品
+  sql: "SELECT product_name, ROUND(SUM(total_amount),2) AS sales FROM orders WHERE category='手机' GROUP BY product_name ORDER BY sales DESC LIMIT 5"
+  business_note: 品类内 TOP 用于选品；N 默认 5，可按用户要求调整
+  intent: ranking
+  category: 手机
+  difficulty: easy
+  tags: [品类, TOP, 商品, 手机, 选品]
+
+- id: tpl_region_top_category
+  title: 区域最畅销品类
+  question: 广东省卖得最好的品类是什么
+  sql: "SELECT category, ROUND(SUM(total_amount),2) AS sales FROM orders WHERE region='广东' GROUP BY category ORDER BY sales DESC LIMIT 1"
+  business_note: 区域最畅销品类受当地消费结构影响；单月样本可能不足
+  intent: ranking
+  category: ALL
+  difficulty: easy
+  tags: [区域, 省份, 品类, 最畅销, 广东]

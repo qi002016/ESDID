@@ -1,0 +1,84 @@
+# =============================================================
+# 字段/表结构卡（doc_type=schema_card）
+# 作用：让 LLM 在写 SQL 前知道"有哪些字段、字段什么含义、有什么坑"
+# 这是 Text-to-SQL 里 schema linking 的核心知识，比把整段 DDL 塞进 prompt 更省 token
+# =============================================================
+
+- id: schema_orders
+  title: orders 订单明细表
+  content: |
+    orders：一行 = 一个订单中的一个商品（当前数据一单一商品，但不要假设永远如此）
+    字段：
+      order_id VARCHAR(32) 订单号，唯一，如 ORD20260901001
+      product_name VARCHAR(128) 商品名称
+      category VARCHAR(32) 品类：手机/电脑/家电/服饰/食品 等中文枚举
+      price DECIMAL(12,2) 商品单价（元）
+      quantity INT 购买件数
+      total_amount DECIMAL(14,2) 行金额 = price × quantity（元）
+      order_time DATETIME 下单时间
+      user_id VARCHAR(32) 用户ID（脱敏）
+      user_type VARCHAR(8) new / old，下单时打标
+      pay_type VARCHAR(16) alipay / wechat / card
+      promo_flag TINYINT 0 普通单 / 1 促销单
+      region VARCHAR(32) 收货省份，可能为 NULL
+    关键坑：
+      - 销售额用 SUM(total_amount)，不要用 SUM(price)
+      - 订单数用 COUNT(DISTINCT order_id)，不要 COUNT(*)
+      - 时间过滤用 order_time，不要用 created_at（入库时间）
+      - 数据不是实时的，相对时间要基于 MAX(order_time) 锚定
+  business_note: 订单表是事实表，指标口径的分子分母都来自这里
+  tags: [表结构, orders, 订单表, 字段, 口径]
+
+- id: schema_sales_target
+  title: sales_target 销售目标表
+  content: |
+    sales_target：月度销售目标
+    字段：
+      period_type VARCHAR(16) 周期类型，当前只有 month
+      period_value VARCHAR(16) 周期值，yyyy-MM
+      category VARCHAR(32) 品类；ALL 表示全品类总目标
+      target_amount DECIMAL(14,2) 目标销售额（元）
+    唯一键：(period_type, period_value, category)
+    关键坑：
+      - 算总目标必须 category='ALL'，否则会把品类目标重复相加
+      - 达成率 = 实际销售额 / target_amount
+      - 目标表可能缺某个月，JOIN 后要允许 NULL
+  business_note: 目标表是维度表，只读，不参与订单聚合
+  tags: [表结构, sales_target, 目标表, 达成率]
+
+- id: schema_daily_summary
+  title: daily_summary 日预聚合表
+  content: |
+    daily_summary：按天 × 品类 × 支付方式 × 用户类型预聚合
+    字段：
+      stat_date DATE 统计日期
+      category / pay_type / user_type 维度，ALL 表示该维度汇总
+      order_count INT 订单数
+      total_sales DECIMAL(16,2) 销售额
+      user_count INT 去重用户数
+    用途：大范围趋势查询优先用它，比扫 orders 快一个数量级
+    关键坑：
+      - 只适合按天聚合的查询；需要订单明细、客单价精确值、商品维度时仍要回 orders
+      - 维度组合是预聚合的，任意维度交叉（如区域）不支持
+  business_note: 预聚合表是性能优化路径，口径必须与 orders 对齐
+  tags: [表结构, daily_summary, 预聚合, 性能, 趋势]
+
+- id: schema_metric_definitions
+  title: 核心指标口径卡
+  content: |
+    销售额：SUM(orders.total_amount)，单位元
+    订单数：COUNT(DISTINCT orders.order_id)
+    销量：SUM(orders.quantity)，单位件
+    客单价：销售额 / 订单数，保留2位小数
+    人均订单数：订单数 / COUNT(DISTINCT user_id)
+    复购率：下单≥2次用户数 / 下单用户总数
+    促销占比：promo_flag=1 的订单数（或金额）/ 全部
+    环比：(本期 - 上期) / 上期，上期为0时返回 NULL
+    同比：(本期 - 去年同期) / 去年同期
+    目标达成率：实际销售额 / sales_target.target_amount
+    日均销售额：销售额 / 有销售的天数（口径需说明）
+    连带率：平均每单商品件数 = AVG(每单 quantity 之和)
+    新客：user_type='new' 的订单去重用户
+    高价值用户：按累计消费额排序的头部用户
+  business_note: '用户问"卖得怎么样"时，默认给销售额+订单数+客单价三件套，并说明口径'
+  tags: [指标, 口径, 定义, 销售额, 客单价, 复购率, 达成率]

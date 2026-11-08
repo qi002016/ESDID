@@ -54,3 +54,21 @@ error-log.md
 error2.md
 skills-lock.json
 style.json
+
+# ===== Python / Agent =====
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
+.cache/
+.pip-tmp/
+.tmp-pip/
+.pytest_cache/
+
+# ===== 临时脚本与训练产物 =====
+tmp_*.py
+tmp_*.txt
+.wheels/
+.dsh-office-*/
+agent/finetune/out/

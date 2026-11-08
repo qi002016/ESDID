@@ -17,6 +17,7 @@ memory/postgres_store.py — 历史对话归档（PostgreSQL）
 
 import json
 import logging
+import time
 from typing import Optional
 
 from sqlalchemy import create_engine, text
@@ -31,7 +32,14 @@ class PostgresHistoryStore:
 
     def __init__(self, url: str):
         # pool_pre_ping：每次取连接先探活，虚拟机重启后自动恢复，不会拿死连接
-        self._engine = create_engine(url, pool_pre_ping=True, pool_size=3, max_overflow=3)
+        # connect_timeout=2：PG 不可达时 2 秒内失败并降级，绝不拖住 /health 或对话主链路
+        self._engine = create_engine(
+            url,
+            pool_pre_ping=True,
+            pool_size=3,
+            max_overflow=3,
+            connect_args={"connect_timeout": 2},
+        )
         self._ensure_schema()
 
     def _ensure_schema(self) -> None:
@@ -183,14 +191,20 @@ class PostgresHistoryStore:
 # ---------------------------------------------------------------------
 _history: Optional[PostgresHistoryStore] = None
 _history_ok: bool = False
+# PG 不可达时不要每次请求都重试（/health 会被拖到 2s+）；30s 内只探一次
+_probe_at: float = 0.0
+_PROBE_TTL: float = 30.0
 
 
 def get_history_store() -> Optional[PostgresHistoryStore]:
-    global _history, _history_ok
+    global _history, _history_ok, _probe_at
     if _history is not None:
         return _history
     if not settings.pg_host:
         return None
+    if time.monotonic() - _probe_at < _PROBE_TTL:
+        return None
+    _probe_at = time.monotonic()
     try:
         _history = PostgresHistoryStore(settings.pg_database_url)
         # 探活：跑一个 SELECT 1，失败即降级

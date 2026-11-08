@@ -43,6 +43,8 @@ ALLOWED_FUNCTIONS = {
     "COUNT", "SUM", "AVG", "MIN", "MAX", "IFNULL", "COALESCE", "NULLIF",
     "DATE", "HOUR", "MONTH", "YEAR", "DAY", "DATEDIFF", "CURDATE", "NOW",
     "DATE_FORMAT", "STRFTIME", "ROUND", "ABS", "CASE", "CAST",
+    "DATE_SUB", "DATE_ADD", "YEARWEEK", "WEEK", "QUARTER", "TIMESTAMPDIFF",
+    "IF", "CONCAT", "FLOOR", "CEIL", "TRUNCATE",
 }
 
 
@@ -87,8 +89,9 @@ def validate_sql(sql: str) -> str:
     if statement_type != "SELECT":
         raise SQLSafetyError(f"仅允许 SELECT 查询，收到: {statement_type}")
 
-    # ---- 4. 表名白名单（同时构建 别名→真实表名 映射，供字段校验） ----
-    table_nodes = list(ast.find_all(exp.Table))
+    # ---- 4. 表名白名单（CTE 名不算真实表，字段校验时映射回 CTE 内部的表） ----
+    cte_names = {c.alias for c in ast.find_all(exp.CTE) if c.alias}
+    table_nodes = [t for t in ast.find_all(exp.Table) if t.name not in cte_names]
     tables = {t.name for t in table_nodes}
     if not tables:
         raise SQLSafetyError("未识别到查询表")
@@ -99,9 +102,14 @@ def validate_sql(sql: str) -> str:
     alias_map: dict[str, object] = {
         (t.alias or t.name): t.name for t in table_nodes
     }
+    # CTE 名 → CTE 内部引用的真实表：WITH st AS (SELECT ... FROM sales_target) → {"st": "sales_target"}
+    for cte in ast.find_all(exp.CTE):
+        inner = {t.name for t in cte.find_all(exp.Table)} & ALLOWED_TABLES
+        if cte.alias and inner:
+            alias_map[cte.alias] = inner if len(inner) > 1 else next(iter(inner))
     # 子查询别名也要映射：LEFT JOIN (SELECT ... ) o → {"o": "orders"}
     for sub in ast.find_all(exp.Subquery):
-        inner_tables = {t.name for t in sub.find_all(exp.Table)}
+        inner_tables = {t.name for t in sub.find_all(exp.Table)} & ALLOWED_TABLES
         if inner_tables and sub.alias:
             alias_map[sub.alias] = inner_tables if len(inner_tables) > 1 else next(iter(inner_tables))
 
@@ -134,12 +142,13 @@ def validate_sql(sql: str) -> str:
     # 注意：用 exp.Anonymous 而非 exp.Func —— sqlglot 30 中 AND/OR 等逻辑节点
     # 也继承 Func，但它们不是"函数调用"，不该进函数白名单检查。
     for func in ast.find_all(exp.Anonymous):
-        name = func.sql_name().upper() if hasattr(func, "sql_name") else func.key
+        raw_name = func.this if isinstance(func.this, str) else func.sql_name()
+        name = (raw_name or "").upper()
         if name not in ALLOWED_FUNCTIONS:
             raise SQLSafetyError(f"函数不在白名单: {name}")
 
     # ---- 7. 自动追加 LIMIT（防止全表超大结果） ----
-    if "LIMIT" not in upper:
+    if ast.args.get("limit") is None:
         sql = f"{sql} LIMIT {settings.max_rows}"
 
     return sql

@@ -87,15 +87,22 @@ def parse_date_window(question: str, anchor: str) -> dict:
         s = (a - timedelta(days=n - 1)).isoformat()
         e = (a + timedelta(days=1)).isoformat()
         return {"start": s, "end": e, "label": f"最近{n}天"}
+    # 最近/近 N 周（不能被下面的「最近」兜底规则抢先匹配）
+    w = re.search(r"(?:最近|近|过去)\s*(\d+)\s*周", q)
+    if w:
+        n = int(w.group(1))
+        s = (a - timedelta(days=7 * n - 1)).isoformat()
+        e = (a + timedelta(days=1)).isoformat()
+        return {"start": s, "end": e, "label": f"最近{n}周"}
+
     if re.search(r"最近|近\s*天|近几天", q):
         s = (a - timedelta(days=6)).isoformat()
         e = (a + timedelta(days=1)).isoformat()
         return {"start": s, "end": e, "label": "最近7天"}
 
-    # 默认：最近 30 天
-    s = (a - timedelta(days=29)).isoformat()
-    e = (a + timedelta(days=1)).isoformat()
-    return {"start": s, "end": e, "label": "最近30天"}
+    # 问题里没有时间词 → 不限定时间（全量），
+    # 不能默认成「最近30天」，否则全量口径的题会被做成错题
+    return {}
 
 
 def extract_category(question: str) -> str | None:
