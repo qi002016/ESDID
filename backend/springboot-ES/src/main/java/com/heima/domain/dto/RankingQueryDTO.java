@@ -29,4 +29,15 @@ public class RankingQueryDTO {
     @Max(value = 50, message = "limit 最大为 50")
     @Schema(description = "返回条数，默认 10")
     private Integer limit;
+
+    @Pattern(regexp = "^(alipay|wechat|card)?$", message = "payType 仅支持 alipay/wechat/card")
+    @Schema(description = "支付方式，空表示全部")
+    private String payType;
+
+    @Pattern(regexp = "^(new|old)?$", message = "userType 仅支持 new/old")
+    @Schema(description = "用户类型，空表示全部")
+    private String userType;
+
+    @Schema(description = "促销标记 0/1，空表示全部")
+    private Integer promoFlag;
 }

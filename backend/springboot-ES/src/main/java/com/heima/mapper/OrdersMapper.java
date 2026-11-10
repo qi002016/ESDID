@@ -55,7 +55,10 @@ public interface OrdersMapper extends BaseMapper<Orders> {
     /** A3 一次查询拿到全部 KPI 指标 */
     KpiRow kpi(@Param("startDate") String startDate,
                @Param("endDate") String endDate,
-               @Param("category") String category);
+               @Param("category") String category,
+               @Param("payType") String payType,
+               @Param("userType") String userType,
+               @Param("promoFlag") Integer promoFlag);
 
     /**
      * A4 商品排行。
@@ -70,12 +73,18 @@ public interface OrdersMapper extends BaseMapper<Orders> {
     List<PeriodRow> orderStats(@Param("granularity") Granularity granularity,
                                @Param("startDate") String startDate,
                                @Param("endDate") String endDate,
-                               @Param("category") String category);
+                               @Param("category") String category,
+                               @Param("payType") String payType,
+                               @Param("userType") String userType,
+                               @Param("promoFlag") Integer promoFlag);
 
     /** A8 客单价区间分布 */
     List<PriceIntervalRow> priceDistribution(@Param("startDate") String startDate,
                                              @Param("endDate") String endDate,
-                                             @Param("category") String category);
+                                             @Param("category") String category,
+                                             @Param("payType") String payType,
+                                             @Param("userType") String userType,
+                                             @Param("promoFlag") Integer promoFlag);
 
     /** A9 品类贡献（窗口函数算占比与累计占比） */
     List<ContributionRow> categoryContribution(@Param("startDate") String startDate,
@@ -88,34 +97,52 @@ public interface OrdersMapper extends BaseMapper<Orders> {
     /** A10 下单时段分布 */
     List<HourlyRow> hourly(@Param("startDate") String startDate,
                            @Param("endDate") String endDate,
-                           @Param("category") String category);
+                           @Param("category") String category,
+                           @Param("payType") String payType,
+                           @Param("userType") String userType,
+                           @Param("promoFlag") Integer promoFlag);
 
     /** A11 新老用户维度聚合 */
     List<UserTypeAggRow> userTypeAgg(@Param("startDate") String startDate,
                                      @Param("endDate") String endDate,
-                                     @Param("category") String category);
+                                     @Param("category") String category,
+                                     @Param("payType") String payType,
+                                     @Param("userType") String userType,
+                                     @Param("promoFlag") Integer promoFlag);
 
     /** A11 支付方式维度聚合（rate 以订单数为分母） */
     List<UserAnalysisVO.PayTypeRateVO> payTypeRates(@Param("startDate") String startDate,
                                                     @Param("endDate") String endDate,
-                                                    @Param("category") String category);
+                                                    @Param("category") String category,
+                                                    @Param("payType") String payType,
+                                                    @Param("userType") String userType,
+                                                    @Param("promoFlag") Integer promoFlag);
 
     /** A3/A11 期内下单用户数（去重） */
     Integer distinctUserCount(@Param("startDate") String startDate,
                               @Param("endDate") String endDate,
-                              @Param("category") String category);
+                              @Param("category") String category,
+                              @Param("payType") String payType,
+                              @Param("userType") String userType,
+                              @Param("promoFlag") Integer promoFlag);
 
     /** A3/A11 期内复购用户数（下单 ≥2 次） */
     Integer repurchaseUserCount(@Param("startDate") String startDate,
                                 @Param("endDate") String endDate,
-                                @Param("category") String category);
+                                @Param("category") String category,
+                                @Param("payType") String payType,
+                                @Param("userType") String userType,
+                                @Param("promoFlag") Integer promoFlag);
 
     /** A17 地域销售分布 */
     List<RegionRow> regionSales(@Param("startDate") String startDate,
                                 @Param("endDate") String endDate,
-                                @Param("category") String category);
+                                @Param("category") String category,
+                                @Param("payType") String payType,
+                                @Param("userType") String userType,
+                                @Param("promoFlag") Integer promoFlag);
 
-    /** A15 活动期/非活动期核心指标 */
+    /** A15 活动期/非活动期核心指标（本身按 promo_flag 统计，不再加过滤） */
     CampaignMetricsRow campaignMetrics(@Param("startDate") String startDate,
                                        @Param("endDate") String endDate,
                                        @Param("category") String category);

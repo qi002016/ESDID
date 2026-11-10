@@ -158,11 +158,11 @@ class OrderStatsServiceImplTest {
 
         service.kpi(statsQuery("2026-09-01", "2026-09-30"));
 
-        verify(ordersMapper).kpi("2026-09-01", "2026-09-30", null);
+        verify(ordersMapper).kpi("2026-09-01", "2026-09-30", null, null, null, null);
     }
 
     private void whenKpi(KpiRow row) {
-        when(ordersMapper.kpi(any(), any(), isNull())).thenReturn(row);
+        when(ordersMapper.kpi(any(), any(), isNull(), isNull(), isNull(), isNull())).thenReturn(row);
     }
 
     // ==================== A7 趋势对比 ====================
@@ -171,10 +171,10 @@ class OrderStatsServiceImplTest {
     @DisplayName("A7 previous 跨月：2026-03-01~2026-03-31 的对比期 = 2026-01-29~2026-02-28（等长且紧邻）")
     void trend_previousAcrossMonths_usesEqualLengthWindowImmediatelyBefore() {
         when(ordersMapper.orderStats(
-                        eq(Granularity.MONTH), eq("2026-03-01"), eq("2026-03-31"), isNull()))
+                        eq(Granularity.MONTH), eq("2026-03-01"), eq("2026-03-31"), isNull(), isNull(), isNull(), isNull()))
                 .thenReturn(List.of(period("2026-03", "310.00", 31L)));
         when(ordersMapper.orderStats(
-                        eq(Granularity.MONTH), eq("2026-01-29"), eq("2026-02-28"), isNull()))
+                        eq(Granularity.MONTH), eq("2026-01-29"), eq("2026-02-28"), isNull(), isNull(), isNull(), isNull()))
                 .thenReturn(List.of(period("2026-02", "248.00", 24L)));
 
         TrendVO vo = service.trend(trendQuery("month", "previous", "2026-03-01", "2026-03-31"));
@@ -204,13 +204,13 @@ class OrderStatsServiceImplTest {
     @DisplayName("A7 previousYear 数据不足：salesGrowthRate=null，items 仍有本期数据")
     void trend_previousYear_insufficientData_keepsCurrentItemsWithNullGrowth() {
         when(ordersMapper.orderStats(
-                        eq(Granularity.DAY), eq("2026-03-01"), eq("2026-03-31"), isNull()))
+                        eq(Granularity.DAY), eq("2026-03-01"), eq("2026-03-31"), isNull(), isNull(), isNull(), isNull()))
                 .thenReturn(List.of(
                         period("2026-03-01", "100.00", 2L),
                         period("2026-03-02", "150.00", 3L)));
         // 去年同期无任何数据
         when(ordersMapper.orderStats(
-                        eq(Granularity.DAY), eq("2025-03-01"), eq("2025-03-31"), isNull()))
+                        eq(Granularity.DAY), eq("2025-03-01"), eq("2025-03-31"), isNull(), isNull(), isNull(), isNull()))
                 .thenReturn(List.of());
 
         TrendVO vo = service.trend(trendQuery("day", "previousYear", "2026-03-01", "2026-03-31"));
@@ -237,10 +237,10 @@ class OrderStatsServiceImplTest {
     @DisplayName("A7 对比期 sales=0：growthRate=null（不是 Infinity/NaN，也不抛异常）")
     void trend_comparePeriodSalesZero_growthRateIsNull() {
         when(ordersMapper.orderStats(
-                        eq(Granularity.MONTH), eq("2026-03-01"), eq("2026-03-31"), isNull()))
+                        eq(Granularity.MONTH), eq("2026-03-01"), eq("2026-03-31"), isNull(), isNull(), isNull(), isNull()))
                 .thenReturn(List.of(period("2026-03", "500.00", 5L)));
         when(ordersMapper.orderStats(
-                        eq(Granularity.MONTH), eq("2026-01-29"), eq("2026-02-28"), isNull()))
+                        eq(Granularity.MONTH), eq("2026-01-29"), eq("2026-02-28"), isNull(), isNull(), isNull(), isNull()))
                 .thenReturn(List.of(period("2026-02", "0.00", 0L)));
 
         TrendVO vo = service.trend(trendQuery("month", "previous", "2026-03-01", "2026-03-31"));
@@ -256,12 +256,12 @@ class OrderStatsServiceImplTest {
     @DisplayName("A7 对比期桶数少于本期：按桶序号对齐，缺桶的 prev/growth 为 null")
     void trend_fewerCompareBuckets_alignsByIndexAndLeavesRestNull() {
         when(ordersMapper.orderStats(
-                        eq(Granularity.DAY), eq("2026-03-01"), eq("2026-03-02"), isNull()))
+                        eq(Granularity.DAY), eq("2026-03-01"), eq("2026-03-02"), isNull(), isNull(), isNull(), isNull()))
                 .thenReturn(List.of(
                         period("2026-03-01", "100.00", 1L),
                         period("2026-03-02", "200.00", 2L)));
         when(ordersMapper.orderStats(
-                        eq(Granularity.DAY), eq("2026-02-27"), eq("2026-02-28"), isNull()))
+                        eq(Granularity.DAY), eq("2026-02-27"), eq("2026-02-28"), isNull(), isNull(), isNull(), isNull()))
                 .thenReturn(List.of(period("2026-02-27", "50.00", 1L)));
 
         TrendVO vo = service.trend(trendQuery("day", "previous", "2026-03-01", "2026-03-02"));
@@ -276,10 +276,10 @@ class OrderStatsServiceImplTest {
     @Test
     @DisplayName("A7 文档口径冲突实测：month 粒度 + 31 天窗口时对比期跨两个月（2 个桶），按桶序号对齐会拿 2026-01 的部分桶对比 2026-03")
     void trend_monthGranularity_partialCompareBucketsAreAlignedByIndex() {
-        when(ordersMapper.orderStats(eq(Granularity.MONTH), eq("2026-03-01"), eq("2026-03-31"), isNull()))
+        when(ordersMapper.orderStats(eq(Granularity.MONTH), eq("2026-03-01"), eq("2026-03-31"), isNull(), isNull(), isNull(), isNull()))
                 .thenReturn(List.of(period("2026-03", "310.00", 31L)));
         // 真实 SQL 对 2026-01-29~2026-02-28 会返回 2 个桶：2026-01（仅含 01-29~01-31）与 2026-02
-        when(ordersMapper.orderStats(eq(Granularity.MONTH), eq("2026-01-29"), eq("2026-02-28"), isNull()))
+        when(ordersMapper.orderStats(eq(Granularity.MONTH), eq("2026-01-29"), eq("2026-02-28"), isNull(), isNull(), isNull(), isNull()))
                 .thenReturn(List.of(period("2026-01", "30.00", 3L), period("2026-02", "248.00", 24L)));
 
         TrendVO vo = service.trend(trendQuery("month", "previous", "2026-03-01", "2026-03-31"));
@@ -300,7 +300,7 @@ class OrderStatsServiceImplTest {
         StatsQueryDTO query = statsQuery("2026-12-21", "2027-01-10");
         query.setGranularity("week");
         when(ordersMapper.orderStats(
-                        eq(Granularity.WEEK), eq("2026-12-21"), eq("2027-01-10"), isNull()))
+                        eq(Granularity.WEEK), eq("2026-12-21"), eq("2027-01-10"), isNull(), isNull(), isNull(), isNull()))
                 .thenReturn(List.of(
                         period("2026-W53", "120.00", 2L),
                         period("2027-W01", "340.00", 5L)));
@@ -324,7 +324,7 @@ class OrderStatsServiceImplTest {
     void stats_emptyRange_returnsEmptyItems() {
         StatsQueryDTO query = statsQuery("2026-09-01", "2026-09-30");
         query.setGranularity("day");
-        when(ordersMapper.orderStats(eq(Granularity.DAY), any(), any(), isNull()))
+        when(ordersMapper.orderStats(eq(Granularity.DAY), any(), any(), isNull(), isNull(), isNull(), isNull()))
                 .thenReturn(List.of());
 
         OrdersStatsVO vo = service.stats(query);
@@ -338,7 +338,7 @@ class OrderStatsServiceImplTest {
     @Test
     @DisplayName("A10 固定返回 24 个元素（0~23），缺失小时补 0")
     void hourly_alwaysReturns24BucketsWithMissingHoursZeroed() {
-        when(ordersMapper.hourly(eq("2026-09-01"), eq("2026-09-30"), isNull()))
+        when(ordersMapper.hourly(eq("2026-09-01"), eq("2026-09-30"), isNull(), isNull(), isNull(), isNull()))
                 .thenReturn(List.of(hour(9, 5, "300.00"), hour(23, 2, "80.00")));
 
         HourlyVO vo = service.hourly(statsQuery("2026-09-01", "2026-09-30"));
@@ -359,7 +359,7 @@ class OrderStatsServiceImplTest {
     @Test
     @DisplayName("A10 空数据也必须是 24 个全 0 元素（前端可直接映射）")
     void hourly_emptyRows_stillReturns24ZeroBuckets() {
-        when(ordersMapper.hourly(any(), any(), isNull())).thenReturn(List.of());
+        when(ordersMapper.hourly(any(), any(), isNull(), isNull(), isNull(), isNull())).thenReturn(List.of());
 
         HourlyVO vo = service.hourly(statsQuery("2026-09-01", "2026-09-30"));
 
@@ -375,7 +375,7 @@ class OrderStatsServiceImplTest {
     @Test
     @DisplayName("A8 固定 6 个区间且顺序不变，缺失区间补 0，orderRatio 之和 ≈ 1")
     void priceDistribution_sixFixedIntervalsWithRatiosSummingToOne() {
-        when(ordersMapper.priceDistribution(eq("2026-09-01"), eq("2026-09-30"), isNull()))
+        when(ordersMapper.priceDistribution(eq("2026-09-01"), eq("2026-09-30"), isNull(), isNull(), isNull(), isNull()))
                 .thenReturn(List.of(
                         interval("0-100", 3, "150.00"),
                         interval("100-300", 7, "1400.00")));
@@ -409,7 +409,7 @@ class OrderStatsServiceImplTest {
     @Test
     @DisplayName("A8 空数据：6 个区间仍返回，orderRatio 分母为 0 -> null")
     void priceDistribution_emptyData_keepsSixIntervalsWithNullRatio() {
-        when(ordersMapper.priceDistribution(any(), any(), isNull())).thenReturn(List.of());
+        when(ordersMapper.priceDistribution(any(), any(), isNull(), isNull(), isNull(), isNull())).thenReturn(List.of());
 
         PriceDistributionVO vo = service.priceDistribution(statsQuery("2026-09-01", "2026-09-30"));
 

@@ -16,7 +16,7 @@ export default defineConfig({
     proxy: {
       // 开发环境：/api 代理到后端 http://localhost:8080/api，避免跨域
       '/api': {
-        target: 'http://localhost:8080/api',
+        target: 'http://localhost:8080',
         changeOrigin: true
       },
       // 开发环境：/agent 代理到 Text-to-SQL Agent 服务 http://localhost:8000（与 /api 对称）

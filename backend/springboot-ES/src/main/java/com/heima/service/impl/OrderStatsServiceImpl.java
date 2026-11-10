@@ -61,7 +61,8 @@ public class OrderStatsServiceImpl implements IOrderStatsService {
     @Override
     public KpiVO kpi(StatsQueryDTO query) {
         String[] range = normalize(query);
-        KpiRow row = ordersMapper.kpi(range[0], range[1], query.getCategory());
+        KpiRow row = ordersMapper.kpi(range[0], range[1], query.getCategory(),
+                query.getPayType(), query.getUserType(), query.getPromoFlag());
 
         long totalUsers = intValue(row.getTotalUsers());
         long newUserCount = intValue(row.getNewUserCount());
@@ -106,7 +107,8 @@ public class OrderStatsServiceImpl implements IOrderStatsService {
     public OrdersStatsVO stats(StatsQueryDTO query) {
         String[] range = normalize(query);
         Granularity granularity = Granularity.of(query.getGranularity());
-        List<PeriodRow> items = ordersMapper.orderStats(granularity, range[0], range[1], query.getCategory());
+        List<PeriodRow> items = ordersMapper.orderStats(granularity, range[0], range[1], query.getCategory(),
+                query.getPayType(), query.getUserType(), query.getPromoFlag());
         return OrdersStatsVO.builder()
                 .granularity(granularity.getValue())
                 .items(items)
@@ -124,8 +126,10 @@ public class OrderStatsServiceImpl implements IOrderStatsService {
                 ? DateRangeUtils.previousYear(current[0], current[1])
                 : DateRangeUtils.previousPeriod(current[0], current[1]);
 
-        List<PeriodRow> currentRows = ordersMapper.orderStats(granularity, current[0], current[1], query.getCategory());
-        List<PeriodRow> compareRows = ordersMapper.orderStats(granularity, compare[0], compare[1], query.getCategory());
+        List<PeriodRow> currentRows = ordersMapper.orderStats(granularity, current[0], current[1], query.getCategory(),
+                query.getPayType(), query.getUserType(), query.getPromoFlag());
+        List<PeriodRow> compareRows = ordersMapper.orderStats(granularity, compare[0], compare[1], query.getCategory(),
+                query.getPayType(), query.getUserType(), query.getPromoFlag());
 
         // 两段长度相同、粒度相同：第 i 个桶互相对应（本接口最易写错的地方）
         List<TrendItemVO> items = new ArrayList<>(currentRows.size());
@@ -166,7 +170,8 @@ public class OrderStatsServiceImpl implements IOrderStatsService {
     @Override
     public PriceDistributionVO priceDistribution(StatsQueryDTO query) {
         String[] range = normalize(query);
-        List<PriceIntervalRow> rows = ordersMapper.priceDistribution(range[0], range[1], query.getCategory());
+        List<PriceIntervalRow> rows = ordersMapper.priceDistribution(range[0], range[1], query.getCategory(),
+                query.getPayType(), query.getUserType(), query.getPromoFlag());
 
         Map<String, PriceIntervalRow> rowMap = new HashMap<>(rows.size());
         for (PriceIntervalRow row : rows) {
@@ -236,7 +241,8 @@ public class OrderStatsServiceImpl implements IOrderStatsService {
     @Override
     public HourlyVO hourly(StatsQueryDTO query) {
         String[] range = normalize(query);
-        List<HourlyRow> rows = ordersMapper.hourly(range[0], range[1], query.getCategory());
+        List<HourlyRow> rows = ordersMapper.hourly(range[0], range[1], query.getCategory(),
+                query.getPayType(), query.getUserType(), query.getPromoFlag());
 
         Map<Integer, HourlyRow> rowMap = new HashMap<>(rows.size());
         for (HourlyRow row : rows) {
@@ -263,7 +269,8 @@ public class OrderStatsServiceImpl implements IOrderStatsService {
         String[] range = normalize(query);
         String category = query.getCategory();
 
-        List<UserTypeAggRow> userTypeRows = ordersMapper.userTypeAgg(range[0], range[1], category);
+        List<UserTypeAggRow> userTypeRows = ordersMapper.userTypeAgg(range[0], range[1], category,
+                query.getPayType(), query.getUserType(), query.getPromoFlag());
         long newUserCount = 0, oldUserCount = 0, newUserOrderCount = 0, oldUserOrderCount = 0;
         BigDecimal newUserSales = BigDecimal.ZERO, oldUserSales = BigDecimal.ZERO;
         for (UserTypeAggRow row : userTypeRows) {
@@ -278,8 +285,10 @@ public class OrderStatsServiceImpl implements IOrderStatsService {
             }
         }
 
-        long totalUsers = intValue(ordersMapper.distinctUserCount(range[0], range[1], category));
-        long repurchaseUsers = intValue(ordersMapper.repurchaseUserCount(range[0], range[1], category));
+        long totalUsers = intValue(ordersMapper.distinctUserCount(range[0], range[1], category,
+                query.getPayType(), query.getUserType(), query.getPromoFlag()));
+        long repurchaseUsers = intValue(ordersMapper.repurchaseUserCount(range[0], range[1], category,
+                query.getPayType(), query.getUserType(), query.getPromoFlag()));
 
         return UserAnalysisVO.builder()
                 .totalUsers((int) totalUsers)
@@ -294,7 +303,8 @@ public class OrderStatsServiceImpl implements IOrderStatsService {
                         MetricsUtils.AMOUNT_SCALE))
                 .newUserRate(MetricsUtils.ratio(newUserCount, totalUsers))
                 .repurchaseRate(MetricsUtils.ratio(repurchaseUsers, totalUsers))
-                .payTypeRates(ordersMapper.payTypeRates(range[0], range[1], category))
+                .payTypeRates(ordersMapper.payTypeRates(range[0], range[1], category,
+                        query.getPayType(), query.getUserType(), query.getPromoFlag()))
                 .build();
     }
 
@@ -355,7 +365,8 @@ public class OrderStatsServiceImpl implements IOrderStatsService {
     @Override
     public RegionSalesVO regionSales(StatsQueryDTO query) {
         String[] range = normalize(query);
-        List<RegionRow> rows = ordersMapper.regionSales(range[0], range[1], query.getCategory());
+        List<RegionRow> rows = ordersMapper.regionSales(range[0], range[1], query.getCategory(),
+                query.getPayType(), query.getUserType(), query.getPromoFlag());
 
         List<RegionSalesVO.RegionVO> items = new ArrayList<>(rows.size());
         int rank = 1;

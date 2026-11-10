@@ -24,4 +24,15 @@ public class StatsQueryDTO {
 
     @Pattern(regexp = "^(\\d{4}-\\d{2}-\\d{2})?$", message = "endDate 格式必须为 yyyy-MM-dd")
     private String endDate;
+
+    @Pattern(regexp = "^(alipay|wechat|card)?$", message = "payType 仅支持 alipay/wechat/card")
+    @Schema(description = "支付方式，空表示全部")
+    private String payType;
+
+    @Pattern(regexp = "^(new|old)?$", message = "userType 仅支持 new/old")
+    @Schema(description = "用户类型，空表示全部")
+    private String userType;
+
+    @Schema(description = "促销标记 0/1，空表示全部")
+    private Integer promoFlag;
 }

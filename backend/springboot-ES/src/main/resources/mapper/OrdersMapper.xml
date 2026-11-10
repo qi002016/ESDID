@@ -2,6 +2,13 @@
 <!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
 <mapper namespace="com.heima.mapper.OrdersMapper">
 
+    <!-- 公共过滤条件：支付方式 / 用户类型 / 促销标记（空值不过滤） -->
+    <sql id="statFilters">
+        <if test="payType != null and payType != ''">AND pay_type = #{payType}</if>
+        <if test="userType != null and userType != ''">AND user_type = #{userType}</if>
+        <if test="promoFlag != null">AND promo_flag = #{promoFlag}</if>
+    </sql>
+
     <!-- ===================== A1 品类列表 ===================== -->
 
     <select id="countProductsByCategory" resultType="com.heima.domain.vo.CategoryVO">
@@ -73,11 +80,13 @@
                 SELECT user_id FROM orders
                 WHERE order_time &gt;= #{startDate} AND order_time &lt; DATE_ADD(#{endDate}, INTERVAL 1 DAY)
                 <if test="category != null and category != ''">AND category = #{category}</if>
+                <include refid="statFilters"/>
                 GROUP BY user_id HAVING COUNT(*) &gt; 1
             ) t)                                                           AS repurchaseUsers
         FROM orders
         WHERE order_time &gt;= #{startDate} AND order_time &lt; DATE_ADD(#{endDate}, INTERVAL 1 DAY)
         <if test="category != null and category != ''">AND category = #{category}</if>
+        <include refid="statFilters"/>
     </select>
 
     <!-- ===================== A4 商品 TOP10 ===================== -->
@@ -91,6 +100,9 @@
         <where>
             order_time &gt;= #{q.startDate} AND order_time &lt; DATE_ADD(#{q.endDate}, INTERVAL 1 DAY)
             <if test="q.category != null and q.category != ''">AND category = #{q.category}</if>
+            <if test="q.payType != null and q.payType != ''">AND pay_type = #{q.payType}</if>
+            <if test="q.userType != null and q.userType != ''">AND user_type = #{q.userType}</if>
+            <if test="q.promoFlag != null">AND promo_flag = #{q.promoFlag}</if>
         </where>
         GROUP BY product_name
         ORDER BY ${orderBy} DESC
@@ -108,6 +120,7 @@
         <where>
             order_time &gt;= #{startDate} AND order_time &lt; DATE_ADD(#{endDate}, INTERVAL 1 DAY)
             <if test="category != null and category != ''">AND category = #{category}</if>
+            <include refid="statFilters"/>
         </where>
         GROUP BY period
         ORDER BY period ASC
@@ -133,6 +146,7 @@
             <where>
                 order_time &gt;= #{startDate} AND order_time &lt; DATE_ADD(#{endDate}, INTERVAL 1 DAY)
                 <if test="category != null and category != ''">AND category = #{category}</if>
+                <include refid="statFilters"/>
             </where>
         ) t
         GROUP BY t.range_label
@@ -176,6 +190,7 @@
         <where>
             order_time &gt;= #{startDate} AND order_time &lt; DATE_ADD(#{endDate}, INTERVAL 1 DAY)
             <if test="category != null and category != ''">AND category = #{category}</if>
+            <include refid="statFilters"/>
         </where>
         GROUP BY HOUR(order_time)
         ORDER BY hour ASC
@@ -192,6 +207,7 @@
         <where>
             order_time &gt;= #{startDate} AND order_time &lt; DATE_ADD(#{endDate}, INTERVAL 1 DAY)
             <if test="category != null and category != ''">AND category = #{category}</if>
+            <include refid="statFilters"/>
         </where>
         GROUP BY user_type
     </select>
@@ -204,6 +220,7 @@
         <where>
             order_time &gt;= #{startDate} AND order_time &lt; DATE_ADD(#{endDate}, INTERVAL 1 DAY)
             <if test="category != null and category != ''">AND category = #{category}</if>
+            <include refid="statFilters"/>
         </where>
         GROUP BY pay_type
         ORDER BY orderCount DESC
@@ -215,6 +232,7 @@
         <where>
             order_time &gt;= #{startDate} AND order_time &lt; DATE_ADD(#{endDate}, INTERVAL 1 DAY)
             <if test="category != null and category != ''">AND category = #{category}</if>
+            <include refid="statFilters"/>
         </where>
     </select>
 
@@ -226,6 +244,7 @@
             <where>
                 order_time &gt;= #{startDate} AND order_time &lt; DATE_ADD(#{endDate}, INTERVAL 1 DAY)
                 <if test="category != null and category != ''">AND category = #{category}</if>
+                <include refid="statFilters"/>
             </where>
             GROUP BY user_id
             HAVING COUNT(*) &gt; 1
@@ -243,6 +262,7 @@
         <where>
             order_time &gt;= #{startDate} AND order_time &lt; DATE_ADD(#{endDate}, INTERVAL 1 DAY)
             <if test="category != null and category != ''">AND category = #{category}</if>
+            <include refid="statFilters"/>
             AND region IS NOT NULL AND region &lt;&gt; ''
         </where>
         GROUP BY region
